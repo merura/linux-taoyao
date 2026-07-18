@@ -5,6 +5,14 @@
 # git clone command, branch taoyao-s-oss)
 kernel-taoyao/
 
+# external device tree source clone (reproducible: see README, same
+# taoyao-s-oss branch, repo MiCode/kernel_devicetree)
+kernel-devicetree-taoyao/
+
+# build outputs (Image, merged dtb) — reproducible from the two clones
+# above, see README step 5-6; too large/binary to track in git
+build-output/
+
 # large binary dumps pulled from the device and their unpacked contents
 extracted/
 

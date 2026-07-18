@@ -81,6 +81,15 @@ host; they don't touch kernel/driver code:
 
 If re-cloning from scratch, redo the shebang rewrite before building.
 
+2. **One real code fix, not a tooling workaround.**
+   `drivers/staging/cam-reclaim/cam_reclaim.c:104` declared
+   `static inline void do_reclaim()` — old K&R-style empty-parens
+   declaration, which newer Clang treats as a hard error
+   (`-Wstrict-prototypes`, not suppressible via `DISABLE_WRAPPER` since
+   it's a real `-Werror` flag, not the custom wrapper). Fixed to
+   `do_reclaim(void)`. This is a genuine (harmless) bug in Xiaomi's
+   staging driver, unrelated to our Nix/Clang-version workarounds.
+
 ## 3. Enter the build shell
 
 ```
@@ -135,7 +144,7 @@ bash scripts/gki/generate_defconfig.sh vendor/taoyao-qgki_defconfig
 part that hits the asm bug.) Output:
 `arch/arm64/configs/vendor/taoyao-qgki_defconfig`, 952 lines.
 
-## 5. Build
+## 5. Build the kernel Image
 
 ```
 mkdir -p out
@@ -143,15 +152,82 @@ export ARCH=arm64 LLVM=1 LLVM_IAS=0 CROSS_COMPILE=aarch64-unknown-linux-gnu- DIS
 make O=out ARCH=arm64 LLVM=1 LLVM_IAS=0 CROSS_COMPILE=aarch64-unknown-linux-gnu- DISABLE_WRAPPER=1 \
   vendor/taoyao-qgki_defconfig
 make O=out ARCH=arm64 LLVM=1 LLVM_IAS=0 CROSS_COMPILE=aarch64-unknown-linux-gnu- DISABLE_WRAPPER=1 \
-  -j"$(nproc)" Image dtbs
+  -j"$(nproc)" -k Image
 ```
 
-Output: `kernel-taoyao/out/arch/arm64/boot/Image` and per-board dtbs under
-`kernel-taoyao/out/arch/arm64/boot/dts/vendor/qcom/`.
+(`-k` = keep going past errors instead of stopping at the first one —
+useful on a first build of a large downstream tree, since it surfaces
+all the real code issues like the `cam_reclaim.c` one above in a single
+pass instead of one failure-fix-retry cycle each.)
+
+Output: `kernel-taoyao/out/arch/arm64/boot/Image`, copied to
+`build-output/Image` for convenience (`build-output/` is gitignored —
+it's a build artifact, reproducible from the two source clones).
 
 Logs from this build live in `logs/` (gitignored).
 
-## 6. postmarketOS device port (in progress)
+## 6. Build the device tree
+
+The kernel source repo (`kernel-taoyao/`) has **no device tree source** —
+Xiaomi ships DTS in a separate repo. `arch/arm64/boot/dts/Makefile` only
+builds a `vendor/` subdirectory if `vendor/Makefile` exists, so:
+
+```
+git clone --depth=1 --single-branch --branch taoyao-s-oss \
+  https://github.com/MiCode/kernel_devicetree.git kernel-devicetree-taoyao
+
+ln -s ../../../../../kernel-devicetree-taoyao \
+  kernel-taoyao/arch/arm64/boot/dts/vendor
+```
+
+(same branch name, confirmed via GitHub API before cloning; `kernel-devicetree-taoyao/`
+is gitignored, same reasoning as the kernel clone in step 2.)
+
+taoyao isn't a standalone dtb — Qualcomm builds it as a **DT overlay**
+(`taoyao-sm7325-overlay.dtbo`, base `yupik.dtb`; see
+`kernel-devicetree-taoyao/qcom/Makefile`), gated on
+`CONFIG_BUILD_ARM64_DT_OVERLAY`, which the merged defconfig from step 4
+did *not* set (only `CONFIG_ARCH_YUPIK=y` came from the QGKI fragment).
+Confirmed by checking `out/.config` after a first `dtbs` build produced
+only generic `yupik-*.dtb` reference boards, no taoyao output. Fix:
+
+```
+echo "CONFIG_BUILD_ARM64_DT_OVERLAY=y" >> arch/arm64/configs/vendor/taoyao-qgki_defconfig
+make O=out ARCH=arm64 LLVM=1 LLVM_IAS=0 CROSS_COMPILE=aarch64-unknown-linux-gnu- DISABLE_WRAPPER=1 \
+  vendor/taoyao-qgki_defconfig
+make O=out ARCH=arm64 LLVM=1 LLVM_IAS=0 CROSS_COMPILE=aarch64-unknown-linux-gnu- DISABLE_WRAPPER=1 \
+  -j"$(nproc)" -k dtbs
+```
+
+This produces `out/arch/arm64/boot/dts/vendor/qcom/taoyao-sm7325-overlay.dtbo`
+and `.../yupik.dtb` (the base it overlays). pmOS's `deviceinfo_dtb`
+mechanism (like `device-nothing-spacewar`'s, our template) expects one
+plain merged dtb, not a base+overlay pair, so merge them statically:
+
+```
+fdtoverlay -i out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb \
+           -o taoyao.dtb \
+           out/arch/arm64/boot/dts/vendor/qcom/taoyao-sm7325-overlay.dtbo
+```
+
+(`fdtoverlay` is part of the `dtc` package already in `shell.nix`.)
+Verified the merge actually applied — decompiled the result and confirmed
+taoyao-specific nodes are present and properly nested (not orphaned):
+`xiaomi_ts_touch@0` (touchscreen), `awinic_haptic@58`, `tfa98xx@34`/`@35`
+(audio codec). Note: the root `model`/`compatible`/`qcom,board-id`
+properties stay as the base's ("Yupik SoC") after merging — that's
+expected, not a merge failure. Those fields live *outside* any
+`fragment@N`/`__overlay__` block in the compiled `.dtbo` (Qualcomm uses
+them as bootloader-side board-selection metadata for picking which
+overlay to apply in the first place, not as content to merge into the
+final tree), so `fdtoverlay` correctly leaves them alone. Cosmetic only —
+`/proc/device-tree/model` will read "Yupik SoC" on the booted device;
+doesn't affect functionality since drivers match on the deeper
+`compatible` strings of individual nodes, not this top-level one.
+
+Output copied to `build-output/taoyao.dtb`.
+
+## 7. postmarketOS device port (in progress)
 
 Scaffold lives in `pmaports-local/device/testing/`:
 `device-xiaomi-taoyao` and `linux-xiaomi-taoyao`. `deviceinfo` values are
@@ -161,9 +237,10 @@ boot image offsets — see step 1's confirmed values above. Not finished
 yet; the plan is:
 
 1. Finish `deviceinfo` + `APKBUILD` for `device-xiaomi-taoyao`.
-2. `linux-xiaomi-taoyao` package: installs the `Image` + dtb built in step
-   5 (packaged, not compiled in the APKBUILD itself, to avoid duplicating
-   the from-scratch kernel build inside `pmbootstrap`'s own chroot).
+2. `linux-xiaomi-taoyao` package: installs `build-output/Image` +
+   `build-output/taoyao.dtb` from steps 5-6 (packaged, not compiled in
+   the APKBUILD itself, to avoid duplicating the from-scratch kernel
+   build inside `pmbootstrap`'s own chroot).
 3. `pmbootstrap init` (point it at `pmaports-local` merged into pmOS's
    own pmaports checkout), then `pmbootstrap install`.
 4. Flash via fastboot (`boot_a`/`vendor_boot_a`, or however
