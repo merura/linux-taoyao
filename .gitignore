@@ -1,0 +1,15 @@
+# nix
+.direnv/
+
+# external kernel source clone (reproducible: see shell.nix / notes for the
+# git clone command, branch taoyao-s-oss)
+kernel-taoyao/
+
+# large binary dumps pulled from the device and their unpacked contents
+extracted/
+
+# build logs
+logs/
+
+# local-only Claude Code permissions, not meant to be shared
+.claude/settings.local.json
