@@ -1,29 +1,31 @@
 # pmaports scaffold for taoyao
 
-Not a real pmaports checkout — just the new package directories being
+Not a real pmaports checkout — just the new package directory being
 drafted for taoyao, meant to be dropped into a real `pmaports` clone
 (e.g. the one `pmbootstrap init` creates) once finished. See the
-top-level `../README.md` for full context and status.
+top-level `../README.md` for full context and status — in particular
+the "Pivot to mainline" section, since this scaffold changed
+significantly there.
 
 - `device/testing/device-xiaomi-taoyao/` — device package: `deviceinfo` +
   `APKBUILD`, using the standard `devicepkg_build`/`devicepkg_package`
-  helpers from `devicepkg-dev`.
-- `device/testing/linux-xiaomi-taoyao/` — kernel package. Currently
-  packages the already-built `Image`/`taoyao.dtb` from `../build-output/`
-  (symlinked in, see `APKBUILD`'s `source=`) rather than building from
-  source inside the package — see the note at the top of that
-  `APKBUILD` and `../TODOs/dual-build.md` for the plan to change that
-  later, using `devicepkg-dev`'s `downstreamkernel_prepare`/
-  `downstreamkernel_package` helpers (found by reading
-  `main/devicepkg-dev/*.sh` in a sparse pmaports checkout — these are
-  the real, current helpers for exactly this kind of package, discovered
-  after confirming no live pmaports device still uses them as a
-  from-source example to copy).
+  helpers from `devicepkg-dev`. Depends on the existing
+  `linux-postmarketos-qcom-sc7280` mainline kernel package (already in
+  pmaports, not something we build) instead of building our own kernel.
+- `device/testing/linux-xiaomi-taoyao/` — **superseded, kept for
+  reference only, not depended on by anything anymore.** Our own
+  from-scratch downstream-kernel package (packages `Image`/`taoyao.dtb`
+  from `../build-output/`, built per `../README.md` steps 1-10). Real
+  work, hit a boot hang that needed hardware (serial console) to debug
+  further; see `../README.md`'s "Pivot to mainline" for why this was set
+  aside in favor of a maintained, already-working mainline kernel.
 
 `deviceinfo` values are based on `device-nothing-spacewar` (same SM7325
-chipset, closest real pmaports device) cross-checked against our own
+chipset, same kernel package now too) cross-checked against our own
 extracted `boot.img`/`vendor_boot.img` offsets — see top-level
-`../README.md` step 1.
+`../README.md` step 1. Those hardware/bootloader facts (flash offsets,
+header version, etc.) stayed valid across the kernel-source pivot, since
+they're independent of which kernel is running.
 
 ## Known gaps — not yet functional end-to-end
 
@@ -35,12 +37,6 @@ extracted `boot.img`/`vendor_boot.img` offsets — see top-level
   to that device's layout, not something safe to guess. Determine the
   real value on-device before attempting to flash (see the comment in
   `deviceinfo` for the commands to check).
-- **No kernel modules packaged.** `linux-xiaomi-taoyao`'s `package()`
-  only installs `Image`/`taoyao.dtb`/`kernel.release` — no
-  `modules_install` was run (the build in `../README.md` only built
-  `Image dtbs`, not `modules`). Anything in the QGKI defconfig set to
-  `=m` won't be available at boot. Fine for a first bring-up attempt to
-  see if it boots at all; needs fixing before the device is actually
-  usable.
-- Not yet run through `pmbootstrap` at all — no `pmbootstrap init`/
-  `install` attempted, no flash attempted, no boot attempted.
+- Not yet flashed for real — only `pmbootstrap flasher boot` (RAM-only,
+  non-destructive) attempted so far, and not yet with the new mainline
+  `deviceinfo`/`APKBUILD`. This is the current next step.

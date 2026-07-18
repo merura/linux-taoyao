@@ -10,13 +10,25 @@ Device facts (from a live EvolutionX install on the phone):
 | partition layout | A/B, active slot at time of extraction: `_a` |
 | boot format | Android boot header v3, `boot_a` (kernel+ramdisk) + `vendor_boot_a` (dtb+vendor ramdisk) |
 
-Decision: build the kernel from Xiaomi's **published downstream source**
-(`taoyao-s-oss` branch), not mainline Linux, and not the prebuilt stock
-kernel binary. The binary-reuse route was tried first and rejected: pmOS's
-`mkbootimg` pipeline and initramfs assume a single plain kernel Image + one
-plain dtb, and no current pmaports device uses `deviceinfo_bootimg_qcdt`
-(our stock `vendor_boot.img` dtb blob has 10 concatenated QCDT-format
-DTBs). Reusing the binary as-is would also drop Android's `vendor_boot`
+**Current status: using the mainline kernel** (see "Pivot to mainline"
+near the end) — the downstream approach documented in steps 1-10 below
+got real, working progress (a genuine from-scratch kernel build, several
+real bugs found and fixed) but hit a boot hang that needed a serial
+console to diagnose further, and the postmarketOS wiki turned up a
+maintained mainline fork already confirmed working on this exact
+device. Steps 1-10 are kept as-is, not deleted — real work, real
+findings, and the dtb/hardware facts discovered there (boot format,
+load offsets) are still accurate/reused. Skip to "Pivot to mainline" for
+the current, active approach.
+
+Original decision (superseded, kept for context): build the kernel from
+Xiaomi's **published downstream source** (`taoyao-s-oss` branch), not
+mainline Linux, and not the prebuilt stock kernel binary. The
+binary-reuse route was tried first and rejected: pmOS's `mkbootimg`
+pipeline and initramfs assume a single plain kernel Image + one plain
+dtb, and no current pmaports device uses `deviceinfo_bootimg_qcdt` (our
+stock `vendor_boot.img` dtb blob has 10 concatenated QCDT-format DTBs).
+Reusing the binary as-is would also drop Android's `vendor_boot`
 ramdisk, which the stock kernel likely needs for display/touch bring-up.
 
 ## 1. Extract the stock boot images (reference only, not required for the build)
@@ -509,13 +521,84 @@ from the stock `vendor_boot.img` back in step 1 — not a guess. Bumped
 `device-xiaomi-taoyao`'s `pkgrel` (deviceinfo changed, not the kernel
 package this time) and re-synced the checksum.
 
-Not yet tested. This is the next thing to verify — and given three
-separate real issues have now been found and fixed across three
-attempts (Haven/Gunyah, extcon/EUD, empty cmdline), each confirmed
-distinct via `pstore` log diffing rather than guessed, there's a
-reasonable chance one or more of these compounds and it may take another
-attempt or two to fully resolve. `extcon`/EUD removal specifically
-should be treated as a bring-up-only workaround worth revisiting later
-(real EUD/TrustZone support would presumably be nicer than
-force-always-connected) — noting this so it doesn't get forgotten once
-things are working.
+### Fourth attempt: cmdline fix applied, still the same black
+### screen + brief vibration, no further progress
+
+Same symptom as before, no visible change. Three separate real issues
+were found and fixed across four attempts (Haven/Gunyah, extcon/EUD,
+empty cmdline — each confirmed distinct via `pstore` log diffing, not
+guessed), and none of them, individually or combined, got past the
+boot hang. At this point further progress genuinely needs a serial
+console (physical UART access) to see what's actually happening after
+the point where `pstore` logging goes silent — not something diagnosable
+further from software alone.
+
+## Pivot to mainline
+
+While stuck on the above, checked the postmarketOS wiki for a taoyao
+page — found one:
+[Xiaomi 12 Lite 5G (xiaomi-taoyao)](https://wiki.postmarketos.org/wiki/Xiaomi_12_Lite_5G_(xiaomi-taoyao))
+(page not reachable by normal fetch — this instance runs Anubis bot
+protection; readable via `https://r.jina.ai/<url>` as a proxy). It
+documents a **working** taoyao port: display, touchscreen, 3D
+acceleration, WiFi, Bluetooth, calls/SMS/mobile data, USB networking,
+USB OTG all confirmed working, using a **mainline** kernel — not
+Xiaomi's downstream source. Not yet merged into pmaports (manual
+install only), maintained by wiki user `zstas`.
+
+Kernel source: [github.com/sc7280-mainline/linux](https://github.com/sc7280-mainline/linux)
+— "Mainline Kernel fork for SC7280/SM7325/QCM6490 devices", actively
+maintained (branches through kernel 7.1.y as of writing). Confirmed via
+GitHub API it ships `arch/arm64/boot/dts/qcom/sm7325-xiaomi-taoyao.dts`,
+and confirmed via the actual `Makefile` content (not just file
+presence) that it's wired into the build:
+`dtb-$(CONFIG_ARCH_QCOM) += sm7325-xiaomi-taoyao.dtb`.
+
+Better still: this kernel is **already packaged in pmaports**, at
+`device/community/linux-postmarketos-qcom-sc7280` (missed on the first
+search of this repo — only `device/testing/` was checked; `grep`ing the
+full local clone directly found it immediately). Real from-source
+APKBUILD, fetches tagged release `v7.1.2-sc7280`, standard
+`make ... dtbs_install`. Already depended on by `device-nothing-spacewar`
+(the same reference device used for the original `deviceinfo` values),
+confirming it's a real, live, currently-building package — not
+something we'd be the first to exercise.
+
+Given: (a) real, working progress on downstream had genuinely stalled
+and needed hardware (serial console) neither of us has, and (b) a
+maintained, already-packaged mainline alternative exists with taoyao
+support *already confirmed working by someone else on this exact
+device* — switched to it. This is explicitly a deviation from the
+original "downstream, not mainline" decision at the top of this file;
+flagged to and approved by the user before making the change, given how
+much it changes the plan.
+
+### What changed
+
+Only `pmaports-local/device/testing/device-xiaomi-taoyao/`:
+
+- `deviceinfo_dtb`: `qcom/taoyao` (our own merged dtb) →
+  `qcom/sm7325-xiaomi-taoyao` (the mainline package's dtb, following
+  `device-nothing-spacewar`'s exact naming convention for the same
+  kernel package).
+- Removed `deviceinfo_kernel_cmdline` — that was specifically a
+  downstream-bring-up workaround; `device-nothing-spacewar`, on the same
+  mainline kernel package, doesn't set one either, so trusting
+  pmOS/mainline's own defaults instead.
+- `APKBUILD` `depends`: `linux-xiaomi-taoyao` (our custom
+  prebuilt-artifact package) → `linux-postmarketos-qcom-sc7280` (the
+  existing, real, from-source mainline package). Bumped `pkgrel`.
+
+Everything else — flash offsets, header version, page size, chassis,
+etc. — is unchanged, since those are real hardware/bootloader facts
+independent of which kernel is running, already confirmed in step 1
+against the actual device.
+
+`linux-xiaomi-taoyao` (our downstream kernel package) and everything in
+`kernel-taoyao/`/`kernel-devicetree-taoyao/`/`build-output/` are left in
+place, not deleted — real work, useful if downstream is revisited later
+(see `TODOs/dual-build.md`), and git history plus this README preserve
+the full debugging trail regardless.
+
+Not yet tested with the new `deviceinfo`/`APKBUILD`. This is the
+current next step.

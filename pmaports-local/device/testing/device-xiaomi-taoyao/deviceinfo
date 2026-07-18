@@ -7,7 +7,7 @@ deviceinfo_name="Xiaomi 12 Lite 5G"
 deviceinfo_manufacturer="Xiaomi"
 deviceinfo_codename="xiaomi-taoyao"
 deviceinfo_year="2022"
-deviceinfo_dtb="qcom/taoyao"
+deviceinfo_dtb="qcom/sm7325-xiaomi-taoyao"
 deviceinfo_append_dtb="true"
 deviceinfo_arch="aarch64"
 deviceinfo_flash_kernel_on_update="true"
@@ -30,13 +30,20 @@ deviceinfo_header_version="2"
 deviceinfo_rootfs_image_sector_size="4096"
 deviceinfo_flash_sparse="true"
 
-# pmbootstrap passes an EMPTY cmdline if this is unset (confirmed by
-# reading pmb/flasher/variables.py: `cmdline_ = deviceinfo.kernel_cmdline
-# or ""`) -- our kernel has been booting with zero cmdline args this
-# whole time, including no console=. Using the real device's own known
-# -correct value, extracted from the stock vendor_boot.img (see
-# ../../../../README.md step 1 / extracted/unpack_vendor).
-deviceinfo_kernel_cmdline="console=ttyMSM0,115200n8"
+# Switched from our own from-scratch downstream (taoyao-s-oss) kernel to
+# the maintained mainline fork (github.com/sc7280-mainline/linux, already
+# packaged in pmaports as linux-postmarketos-qcom-sc7280) after getting
+# stuck on a boot hang that needed a serial console to diagnose further.
+# The postmarketOS wiki confirms taoyao boots on this mainline kernel
+# with display/touch/WiFi/network/modem working, and it already ships
+# arch/arm64/boot/dts/qcom/sm7325-xiaomi-taoyao.dts, wired into that
+# package's build (dtb-$(CONFIG_ARCH_QCOM) += sm7325-xiaomi-taoyao.dtb in
+# its Makefile). Deliberately not setting deviceinfo_kernel_cmdline here
+# (unlike the abandoned downstream attempt) -- device-nothing-spacewar,
+# on the same kernel package, doesn't set one either, so trusting
+# pmOS/mainline's own defaults. See ../../../../README.md for the full
+# downstream history (preserved, not deleted) and
+# ../../../../TODOs/dual-build.md.
 
 # UNVERIFIED: this is an A/B, dynamic-partition (super.img) device, so
 # deviceinfo_super_partitions is very likely required for `pmbootstrap

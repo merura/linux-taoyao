@@ -3,13 +3,13 @@ maintainer="Yernar Tursynali <dev@zxc.sx>"
 pkgname=device-xiaomi-taoyao
 pkgdesc="Xiaomi 12 Lite 5G"
 pkgver=1
-pkgrel=1
+pkgrel=2
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"
 options="!check !archcheck"
 depends="
-	linux-xiaomi-taoyao
+	linux-postmarketos-qcom-sc7280
 	mkbootimg
 	postmarketos-base
 "
@@ -27,5 +27,5 @@ package() {
 }
 
 sha512sums="
-14c6fa016f6ed06f08145d9e8afbb016991ae97439498ae62536025132401cf87bdd9ba46bc55336789d16ced54312290531bc3098bd8596cc44f1ecd7b2bc2a  deviceinfo
+e7d4d152cf0a202177b0b24ff84d90a2467193e5a6721b7d7cfbc36d06fff5f807e68efec444e17181f29fd4e96579f54c32d1a2c42455c1de801e70ef073460  deviceinfo
 "
