@@ -398,5 +398,76 @@ needed, only kernel driver config changed), re-synced
 `pmaports-local/device/testing/linux-xiaomi-taoyao/APKBUILD` (bumped
 `pkgrel`), re-ran `pmbootstrap install` and `pmbootstrap flasher boot`.
 
-Not yet confirmed whether this actually fixes the reset — this is the
-next thing to verify.
+### Second `flasher boot` attempt: no reset, but no USB either
+
+Confirmed the Haven fix worked: no auto-reboot this time, device stayed
+up past a minute (vs. ~10s before). But `lsusb`/`fastboot devices`/
+`adb devices` showed nothing from the device at all — no way to reach
+it. Recovered a second, much shorter/cleaner `pstore` log (116 lines vs.
+1193 before) confirming the `hh_rm_call` spam is completely gone. It
+still ends at the same `Warning: unable to open an initial console`
+message, but re-examined what that actually means: it's PID 1 failing
+to open a controlling tty (stdin/stdout for `init`), which doesn't stop
+`printk`/pstore logging in general — so the log ending there doesn't
+necessarily mean the kernel died there. Combined with no reset, the
+likely read is the kernel booted successfully into userspace and is
+just invisible to us (no console, no way to reach it over USB yet).
+
+Ran a continuous host-side USB/network monitor (1s polling) starting
+before the next `fastboot boot`, to see what actually happens on the
+wire rather than checking well after the fact. Findings:
+
+- Ruled out "missing kernel module" as the explanation for no USB
+  networking — checked `out/.config`: `CONFIG_USB_DWC3`,
+  `CONFIG_USB_GADGET`, `CONFIG_USB_CONFIGFS`, and the NCM/ACM gadget
+  functions pmOS's usb-network mkinitfs hook needs are all `=y`
+  (built-in), not modules. Not a modules-packaging gap this time.
+- The monitor caught `Bus 003 Device 019: ID 18d1:d00d ... (fastboot)`
+  — the bootloader's own fastboot USB identity — persisting completely
+  unchanged for the entire time between `fastboot boot` and the eventual
+  `USB disconnect, device number 19` the host logged. After that
+  disconnect (which is just fastboot's own protocol session ending as
+  it hands off to the kernel — expected, not itself a bad sign), the
+  bus stayed completely empty for the remaining ~100s of monitoring.
+  Nothing from our kernel's own USB gadget ever appeared, at any point.
+
+That combination — kernel apparently running fine, but never presenting
+its own USB gadget identity — pointed at the DWC3 driver's cable-detect
+state machine rather than anything display/console-related. Traced
+`assume cable is not connected` in
+`drivers/usb/dwc3/dwc3-msm.c:5047` back through the code:
+
+- That specific line is charger-type auto-detection (`apsd`) logic, not
+  cable-attach detection — the comment there says the controller can
+  proceed normally without it. A red herring.
+- The actual cable-attach signal comes through `extcon`, registered from
+  `ssusb@a600000`'s `extcon` phandle in the dtb, pointing to
+  `qcom,msm-eud@88e0000` — Qualcomm's "Embedded USB Debugger" block,
+  configured with `qcom,secure-eud-en` (needs a secure TrustZone/SCM
+  call to enable). The *very first* line of both pstore logs is
+  `scm_mem_protection_init_do: SCM call failed` — SCM/TrustZone
+  communication is broken from the first moment of boot. Plausible
+  unifying cause for both the Haven RM failures and this: `fastboot
+  boot` (unsigned/temporary boot) likely skips TrustZone provisioning a
+  normal verified boot chain would perform.
+- Found the fix in the driver itself
+  (`drivers/usb/dwc3/dwc3-msm.c:5063`): `if (!mdwc->role_switch &&
+  !mdwc->extcon)` — when there's no extcon registered at all, the
+  driver falls back to unconditionally setting `vbus_active = true`
+  ("assume always connected"), exactly the behavior wanted here since a
+  cable is always physically present during bring-up testing.
+
+Fix: removed the `extcon` property from `ssusb@a600000` in the base
+`yupik.dtb` (not the taoyao overlay — the property lives in the base),
+using `fdtput -d out/.../yupik.dtb /soc/ssusb@a600000 extcon`, then
+re-ran the `fdtoverlay` merge from README step 6 to produce a new
+`build-output/taoyao.dtb` (no kernel rebuild needed — dtb-only change).
+Re-synced the checksum in `linux-xiaomi-taoyao`'s `APKBUILD`, bumped
+`pkgrel` again.
+
+Not yet confirmed whether this actually gets USB networking working —
+this is the next thing to verify. If it works, the `extcon`/EUD removal
+should be treated as a bring-up-only workaround worth revisiting later
+(real EUD/TrustZone support would presumably be nicer than force-always
+-connected, e.g. for actual USB debugging via EUD), not a permanent fix
+— noting this so it doesn't get forgotten once things are working.

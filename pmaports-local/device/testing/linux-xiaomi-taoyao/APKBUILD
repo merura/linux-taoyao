@@ -12,7 +12,7 @@ maintainer="Yernar Tursynali <dev@zxc.sx>"
 _flavor="xiaomi-taoyao"
 pkgname=linux-$_flavor
 pkgver=5.4.86
-pkgrel=1
+pkgrel=2
 pkgdesc="Xiaomi 12 Lite 5G (taoyao) downstream kernel (taoyao-s-oss)"
 arch="aarch64"
 _carch="arm64"
@@ -45,5 +45,5 @@ package() {
 
 sha512sums="
 2e4d67da6ff098de85c2f1909a28b89bfe5e06b1cacc2ce39cee4ecb50008129b31414a423d31305eb2002a7f89601a686fa9eece075ac35d7b7d2b2af157f66  Image
-451b031dd90c4132f339398c27850360e125350bfa2c108d77220d70bd4d572b7f42c0ebed70b3f552c137952df779118ab75165403d96d41c75ed532a306138  taoyao.dtb
+5b77370436ff19d96573e510511c3761b2fe93cb1d50db7b8f8a4128181ed8cf6e1571a4e4a348cc9d03fe71cc68e167e61f9f8cd07e0c4038e216a08dea5854  taoyao.dtb
 "
