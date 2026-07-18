@@ -227,23 +227,82 @@ doesn't affect functionality since drivers match on the deeper
 
 Output copied to `build-output/taoyao.dtb`.
 
-## 7. postmarketOS device port (in progress)
+## 7. postmarketOS device port
 
 Scaffold lives in `pmaports-local/device/testing/`:
-`device-xiaomi-taoyao` and `linux-xiaomi-taoyao`. `deviceinfo` values are
-based on `device-nothing-spacewar` (same SM7325 chipset, currently the
-closest real pmaports device) cross-checked against our own extracted
-boot image offsets — see step 1's confirmed values above. Not finished
-yet; the plan is:
+`device-xiaomi-taoyao` and `linux-xiaomi-taoyao`, using the real
+`devicepkg-dev` helpers (`devicepkg_build`/`devicepkg_package`, found by
+reading `main/devicepkg-dev/*.sh` in a sparse pmaports checkout, since no
+live pmaports device still uses the from-source
+`downstreamkernel_prepare`/`downstreamkernel_package` pattern as a
+copyable example — see `pmaports-local/README.md` for the known gaps,
+notably no kernel modules packaged yet and `deviceinfo_super_partitions`
+intentionally left unset/unverified).
 
-1. Finish `deviceinfo` + `APKBUILD` for `device-xiaomi-taoyao`.
-2. `linux-xiaomi-taoyao` package: installs `build-output/Image` +
-   `build-output/taoyao.dtb` from steps 5-6 (packaged, not compiled in
-   the APKBUILD itself, to avoid duplicating the from-scratch kernel
-   build inside `pmbootstrap`'s own chroot).
-3. `pmbootstrap init` (point it at `pmaports-local` merged into pmOS's
-   own pmaports checkout), then `pmbootstrap install`.
-4. Flash via fastboot (`boot_a`/`vendor_boot_a`, or however
-   `pmbootstrap install`'s output maps to partitions once we get there).
+## 8. Get pmbootstrap running without the interactive wizard
 
-Not yet validated on-device — no boot has been attempted.
+`pmbootstrap init`'s wizard is entirely replaceable with direct config —
+every question it asks is just a `pmbootstrap config <key> <value>`
+under the hood, confirmed by reading `pmb/core/config.py`. Faster to
+write the config file directly:
+
+```
+git clone --depth=1 https://gitlab.postmarketos.org/postmarketOS/pmaports.git pmaports-full
+cp -r pmaports-local/device/testing/device-xiaomi-taoyao pmaports-full/device/testing/
+cp -r pmaports-local/device/testing/linux-xiaomi-taoyao pmaports-full/device/testing/
+```
+
+(`pmaports-full/` is gitignored — same reasoning as the kernel clones.
+The two `cp -r` calls preserve the `Image`/`taoyao.dtb` symlinks
+correctly since `pmaports-full/` sits at the same directory depth as
+`pmaports-local/`, so the existing `../../../../build-output/...`
+relative paths still resolve.)
+
+```
+mkdir -p ~/.local/var/pmbootstrap
+echo "8" > ~/.local/var/pmbootstrap/version   # pmb.config.work_version — skips
+                                                # the "please run init" migration check
+cat > ~/.config/pmbootstrap_v3.cfg <<'EOF'
+[pmbootstrap]
+aports = /home/user/project/linux-taoyao/pmaports-full
+device = xiaomi-taoyao
+ui = console
+user = user
+hostname = taoyao-pmos
+
+[providers]
+
+[mirrors]
+EOF
+```
+
+(Config path confirmed via `pmb/config/__init__.py`:
+`~/.config/pmbootstrap_v3.cfg`, *not* the `pmbootstrap.cfg` name older
+docs might reference — pmbootstrap explicitly detects the old filename
+and refuses to start, telling you to regenerate via `init`.)
+
+Verified this actually works — `pmbootstrap deviceinfo_parse xiaomi-taoyao`
+(well, the closest working equivalent — that exact subcommand doesn't
+exist in this pmbootstrap version, but any subcommand prints a status
+banner) reports `Device: xiaomi-taoyao (aarch64)`, confirming our
+`deviceinfo` parses correctly and the device is recognized.
+
+## 9. `pmbootstrap install` — blocked on root, handed off
+
+```
+pmbootstrap -y install --password test1234
+```
+
+Gets as far as `(1/4) PREPARE NATIVE CHROOT` then fails:
+`Command failed (exit code 1): % sudo mkdir -p .../chroot_native/dev`.
+This is a genuine, correct requirement — setting up the Alpine chroot
+needs real root (mounting `/dev`, `/proc`, etc., not something to work
+around), and `sudo` here needs an interactive password not available in
+this session. Also just not something to run unattended regardless —
+it's a real privileged system operation.
+
+**Not yet run. Handed off** — run the command above yourself (inside
+`nix-shell shell.nix`, which provides `pmbootstrap`). Whatever error
+comes back next (missing dependency in our minimal `linux-xiaomi-taoyao`/
+`device-xiaomi-taoyao` packages, missing `deviceinfo_super_partitions`,
+etc.) is the next thing to fix here.

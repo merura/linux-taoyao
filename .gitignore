@@ -13,6 +13,10 @@ kernel-devicetree-taoyao/
 # above, see README step 5-6; too large/binary to track in git
 build-output/
 
+# full pmaports clone used as the pmbootstrap aports dir (pmaports-local/
+# gets copied into this) — reproducible, see README step 8
+pmaports-full/
+
 # large binary dumps pulled from the device and their unpacked contents
 extracted/
 
