@@ -301,8 +301,45 @@ around), and `sudo` here needs an interactive password not available in
 this session. Also just not something to run unattended regardless —
 it's a real privileged system operation.
 
-**Not yet run. Handed off** — run the command above yourself (inside
-`nix-shell shell.nix`, which provides `pmbootstrap`). Whatever error
-comes back next (missing dependency in our minimal `linux-xiaomi-taoyao`/
-`device-xiaomi-taoyao` packages, missing `deviceinfo_super_partitions`,
-etc.) is the next thing to fix here.
+Needed to be run interactively by hand (needs a real `sudo` password) —
+not something this assistant can run itself, and not something to run
+unattended regardless given it's a real privileged system operation.
+
+First real attempt failed fast with a much simpler problem than
+expected: `maintainer="you"` in both APKBUILDs isn't a valid RFC822
+address, and `abuild` rejects that outright (`'you' is not a valid
+rfc822 address`). Fixed to a real name/email (pulled from `git config
+user.name`/`user.email` rather than inventing one).
+
+Second attempt: **`DONE!`** — full success. `pmbootstrap install`
+built both `linux-xiaomi-taoyao` and `device-xiaomi-taoyao` from our
+packages, assembled the rootfs, and produced:
+
+- `~/.local/var/pmbootstrap/chroot_native/home/pmos/rootfs/xiaomi-taoyao.img`
+  — combined rootfs+boot image (single file, own internal partition
+  table for `/boot` + `/`, so no repartitioning of the real device is
+  needed to flash it)
+- `~/.local/var/pmbootstrap/chroot_rootfs_xiaomi-taoyao/boot` — kernel +
+  initramfs, flashable/bootable separately
+
+## 10. Testing on-device — non-destructive first
+
+pmbootstrap offers three ways to get this onto the device. Given the
+flashing-safety discussion earlier (never risk a state where you can't
+reflash — see conversation, not written up separately here), the right
+order is:
+
+1. **`pmbootstrap flasher boot`** — `fastboot boot`s the kernel+initramfs
+   directly into RAM, no write to the device at all. This is the one to
+   try first: if the from-scratch kernel/merged dtb are wrong in some
+   way that prevents booting, you find out with *zero* risk — reboot and
+   the device is untouched. Only reason to not fully trust this as a
+   complete test: it doesn't validate the actual flash-and-persist path,
+   only whether the kernel/dtb/initramfs combination boots at all.
+2. `pmbootstrap flasher flash_kernel` — writes kernel+initramfs for
+   real (to `boot_a`, per `deviceinfo_flash_method=fastboot` — verify
+   this before running it, don't assume).
+3. `pmbootstrap flasher flash_rootfs` — writes the rootfs image for
+   real.
+
+Not yet attempted. This is the next step.
