@@ -342,4 +342,61 @@ order is:
 3. `pmbootstrap flasher flash_rootfs` — writes the rootfs image for
    real.
 
-Not yet attempted. This is the next step.
+### First `flasher boot` attempt: booted, then reset after ~10s
+
+`fastboot boot` succeeded on the host side (image accepted, sent,
+"Booting" OKAY) — but the device went black for ~10 seconds then
+rebooted back into EvolutionX on its own. Exactly the safe outcome the
+non-destructive test is for: `fastboot boot` never writes anything, so
+when the temporarily-booted kernel didn't survive, the device just fell
+back to whatever's actually flashed. No damage, no data loss.
+
+**Diagnosed the actual cause without a serial console**, using
+Qualcomm's `pstore`/`ramoops` mechanism — a reserved memory region that
+persists console output across a reset, readable from the *next* boot.
+Since our merged `taoyao.dtb` reused the real device's reserved-memory
+layout, the crash log from our kernel attempt was sitting there once
+back in EvolutionX:
+
+```
+adb shell su -c 'cat /sys/fs/pstore/console-ramoops-0'
+```
+
+This showed the kernel genuinely booting and doing real hardware
+bring-up for ~1.4 seconds — PMIC/regulator init, and the `aw8622x`
+haptics driver fully probed and ran its calibration routine
+successfully. Confirms the kernel/dtb combination fundamentally works.
+The log then fills with hundreds of repeated
+`hh_rm_call: ... failed with RM err: 6` / `hh_rm_console_write: Unable
+to send CONSOLE_WRITE to RM: -22` lines and ends at `Warning: unable to
+open an initial console` — no panic message after that, consistent with
+boot stalling there until the ~10s watchdog reset.
+
+`hh_*` is Qualcomm's Gunyah/Haven hypervisor resource-manager (RM)
+interface. Root cause: `CONFIG_HAVEN_DRIVERS=y` (and its sub-options —
+`HH_CTRL`, `HH_MSGQ`, `HH_RM_DRV`, `HH_DBL`, `HH_IRQ_LEND`,
+`HH_MEM_NOTIFIER`, `HH_VIRT_WATCHDOG` — plus `HVC_HAVEN`, `QRTR_HAVEN`,
+`QCOM_MEM_BUF` elsewhere in the tree) assume a working hypervisor RM
+channel that isn't available/functional when booting this way — every
+single RM call fails, not just some, consistent with the channel simply
+not being connected rather than a slow/flaky driver. Two of the
+dependent drivers explain two separate log symptoms directly:
+`HVC_HAVEN` (`depends on HH_RM_DRV`) is what's failing to open the
+"initial console" — exactly where forward progress in the log stops —
+and `HH_VIRT_WATCHDOG` is a watchdog-petting driver that depends on the
+same broken channel, a very plausible trigger for the reset itself.
+
+Fix: disabled the whole Haven/Gunyah subsystem in
+`arch/arm64/configs/vendor/taoyao-qgki_defconfig`
+(`# CONFIG_HAVEN_DRIVERS is not set` — cascades to disable all the
+`HH_*` sub-options automatically via Kconfig `if HAVEN_DRIVERS`/`endif`
+nesting, confirmed by checking `out/.config` after regenerating; also
+explicitly disabled `HVC_HAVEN`, `QRTR_HAVEN`, `QCOM_MEM_BUF` which live
+outside that `if` block). Rebuilt (`make ... Image` — no `dtbs` rebuild
+needed, only kernel driver config changed), re-synced
+`build-output/Image` and its checksum in
+`pmaports-local/device/testing/linux-xiaomi-taoyao/APKBUILD` (bumped
+`pkgrel`), re-ran `pmbootstrap install` and `pmbootstrap flasher boot`.
+
+Not yet confirmed whether this actually fixes the reset — this is the
+next thing to verify.
