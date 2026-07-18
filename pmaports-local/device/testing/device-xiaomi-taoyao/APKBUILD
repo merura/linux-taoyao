@@ -1,5 +1,5 @@
 # Reference: <https://postmarketos.org/devicepkg>
-maintainer="you"
+maintainer="taoyao porter <ernar90594@gmail.com>"
 pkgname=device-xiaomi-taoyao
 pkgdesc="Xiaomi 12 Lite 5G"
 pkgver=1
