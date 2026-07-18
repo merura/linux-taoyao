@@ -12,8 +12,8 @@ A `linux-taoyao.nix` (or `pkgs/linux-taoyao/default.nix`) derivation that,
 given the `kernel-taoyao` source (fetched via `fetchgit`, pinned to a
 specific commit on `taoyao-s-oss` — not a floating branch), produces
 `Image` + the taoyao dtb as build outputs, with `nix-build` as the only
-command needed. This is also most of the work `../nixos-mobile.md` will
-need later — see that file.
+command needed. This is also the `kernel/default.nix` piece the dual
+pmOS + mobile-nixos repo in `../dual-build.md` will need — see that file.
 
 ## What has to move into the derivation
 
@@ -48,7 +48,7 @@ From the current manual process (`../README.md` steps 2-5):
   write time so future breakage is easy to diagnose.
 - Should this live in this repo, or get upstreamed as a proper
   `pkgs/os-specific/linux/kernel/taoyao.nix`-style thing eventually if
-  mobile-nixos support materializes (see `../nixos-mobile.md`)?
+  mobile-nixos support materializes (see `../dual-build.md`)?
 - Once `pmbootstrap`'s own APKBUILD packages the kernel, does duplicating
   a Nix derivation for the same build actually pull its weight, or is it
   only worth it once mobile-nixos work starts? Bias: don't build this
