@@ -1,0 +1,31 @@
+# Reference: <https://postmarketos.org/devicepkg>
+maintainer="you"
+pkgname=device-xiaomi-taoyao
+pkgdesc="Xiaomi 12 Lite 5G"
+pkgver=1
+pkgrel=0
+url="https://postmarketos.org"
+license="MIT"
+arch="aarch64"
+options="!check !archcheck"
+depends="
+	linux-xiaomi-taoyao
+	mkbootimg
+	postmarketos-base
+"
+makedepends="devicepkg-dev"
+source="
+	deviceinfo
+"
+
+build() {
+	devicepkg_build $startdir $pkgname
+}
+
+package() {
+	devicepkg_package $startdir $pkgname
+}
+
+sha512sums="
+584a8110c370e9ff793d60b7468b41750f615cd6b3bfefc52f39a0ee3a38377d6e41d14f04eb96218e09183b18bcf99a5810fbde39f36e38c0696e5627eb54e6  deviceinfo
+"

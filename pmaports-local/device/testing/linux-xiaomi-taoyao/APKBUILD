@@ -1,0 +1,49 @@
+# Reference: <https://postmarketos.org/vendorkernel>
+#
+# NOTE: this does not build the kernel — it packages the Image + dtb
+# already built via the manual Nix-based process documented in
+# ../../../../README.md (steps 2-6). See ../../../../TODOs/dual-build.md
+# and ../../../../TODOs/nix-derivated-pmos.md for the plan to eventually
+# make this a real from-source build (using devicepkg-dev's
+# downstreamkernel_prepare/downstreamkernel_package helpers) instead of
+# packaging prebuilt artifacts. Deferred for now to get an installable
+# image faster; revisit once first boot is confirmed working.
+maintainer="you"
+_flavor="xiaomi-taoyao"
+pkgname=linux-$_flavor
+pkgver=5.4.86
+pkgrel=0
+pkgdesc="Xiaomi 12 Lite 5G (taoyao) downstream kernel (taoyao-s-oss)"
+arch="aarch64"
+_carch="arm64"
+url="https://github.com/MiCode/Xiaomi_Kernel_OpenSource"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps pmb:cross-native"
+makedepends=""
+source="
+	Image
+	taoyao.dtb
+"
+builddir="$srcdir"
+
+# real value from `out/include/config/kernel.release` after the build
+# documented in README.md step 5 (kernel Makefile VERSION.PATCHLEVEL.SUBLEVEL
+# plus the taoyao-s-oss commit this was built from)
+_kernel_release="5.4.86-qgki-g647f2f3764e4-dirty"
+
+build() {
+	:
+}
+
+package() {
+	install -Dm644 "$srcdir"/Image "$pkgdir"/boot/vmlinuz
+	install -Dm644 "$srcdir"/taoyao.dtb "$pkgdir"/boot/dtbs/qcom/taoyao.dtb
+
+	mkdir -p "$pkgdir"/usr/share/kernel/$_flavor
+	echo "$_kernel_release" > "$pkgdir"/usr/share/kernel/$_flavor/kernel.release
+}
+
+sha512sums="
+b0a057f8d4e6f99e244a891961ff2a3dbcc1aeedaae2d2bfc45626828bd05db22f1b820af40064cae490bc73096f28b9eb19abd9601bba0876c5351e3ed3d1b7  Image
+451b031dd90c4132f339398c27850360e125350bfa2c108d77220d70bd4d572b7f42c0ebed70b3f552c137952df779118ab75165403d96d41c75ed532a306138  taoyao.dtb
+"

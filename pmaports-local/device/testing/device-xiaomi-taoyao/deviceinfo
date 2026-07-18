@@ -1,0 +1,42 @@
+# Reference: <https://postmarketos.org/deviceinfo>
+# Please use double quotes only. You can source this file in shell
+# scripts.
+
+deviceinfo_format_version="0"
+deviceinfo_name="Xiaomi 12 Lite 5G"
+deviceinfo_manufacturer="Xiaomi"
+deviceinfo_codename="xiaomi-taoyao"
+deviceinfo_year="2022"
+deviceinfo_dtb="qcom/taoyao"
+deviceinfo_append_dtb="true"
+deviceinfo_arch="aarch64"
+deviceinfo_flash_kernel_on_update="true"
+
+# Device related
+deviceinfo_drm="true"
+deviceinfo_chassis="handset"
+
+# Bootloader related
+deviceinfo_flash_method="fastboot"
+deviceinfo_generate_bootimg="true"
+deviceinfo_flash_pagesize="4096"
+deviceinfo_flash_offset_base="0x00000000"
+deviceinfo_flash_offset_dtb="0x01f00000"
+deviceinfo_flash_offset_kernel="0x00008000"
+deviceinfo_flash_offset_ramdisk="0x01000000"
+deviceinfo_flash_offset_second="0x00000000"
+deviceinfo_flash_offset_tags="0x00000100"
+deviceinfo_header_version="2"
+deviceinfo_rootfs_image_sector_size="4096"
+deviceinfo_flash_sparse="true"
+
+# UNVERIFIED: this is an A/B, dynamic-partition (super.img) device, so
+# deviceinfo_super_partitions is very likely required for `pmbootstrap
+# install`/flashing to work, the same way device-nothing-spacewar (same
+# SM7325 chipset) sets it. Do NOT guess a value here — it's a real block
+# device path specific to this device's partition table and copying
+# another device's value could target the wrong partition. Determine it
+# on-device before attempting to flash, e.g.:
+#   adb shell ls -la /dev/block/mapper/
+#   adb shell cat /proc/partitions
+# deviceinfo_super_partitions="/dev/sdXN /dev/sdXN"
