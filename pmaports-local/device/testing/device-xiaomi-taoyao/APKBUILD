@@ -3,7 +3,7 @@ maintainer="Yernar Tursynali <dev@zxc.sx>"
 pkgname=device-xiaomi-taoyao
 pkgdesc="Xiaomi 12 Lite 5G"
 pkgver=1
-pkgrel=2
+pkgrel=3
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"
@@ -12,6 +12,7 @@ depends="
 	linux-postmarketos-qcom-sc7280
 	mkbootimg
 	postmarketos-base
+	systemd-boot
 "
 makedepends="devicepkg-dev"
 source="

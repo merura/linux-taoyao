@@ -600,5 +600,33 @@ place, not deleted — real work, useful if downstream is revisited later
 (see `TODOs/dual-build.md`), and git history plus this README preserve
 the full debugging trail regardless.
 
-Not yet tested with the new `deviceinfo`/`APKBUILD`. This is the
-current next step.
+### First mainline attempt: worse than downstream — instant fallback, no progress
+
+Tested. `fastboot boot` reported success on the host side as usual, but
+this time: black screen, **no vibration at all** (vs. the downstream
+kernel's brief haptic-calibration buzz), and `fastboot devices`
+afterward still showed the phone in fastboot mode with the *same*
+unchanged device descriptor — no evidence the kernel ever started
+executing, not even the ~1.4s of real hardware bring-up the downstream
+kernel managed. (No vibration isn't itself concerning — the wiki lists
+haptics as a broken feature on this mainline port.)
+
+Checked the actual boot artifacts pmbootstrap generated
+(`~/.local/var/pmbootstrap/chroot_rootfs_xiaomi-taoyao/boot/`):
+`vmlinuz` is `gzip compressed data` (13.7MB compressed, 36.8MB
+uncompressed) — not a raw bootable ARM64 `Image` the way our downstream
+kernel's boot image was (49MB, uncompressed). A `linux.efi` file also
+sits right next to it. Re-checked `device-nothing-spacewar`'s `APKBUILD`
+(same kernel package) and noticed its `depends=` includes
+`systemd-boot`, which ours didn't. Reading between these: this kernel
+package is meant to be launched via **systemd-boot chainloading** (a
+UEFI-capable stub gets fastboot-flashed to the boot partition, which
+then loads the real kernel via UEFI) — not a direct raw-Image jump the
+way ABL boots our downstream kernel. Missing that piece would fully
+explain zero execution progress: what ended up in the boot image wasn't
+something ABL could directly run at all.
+
+Fix: added `systemd-boot` to `device-xiaomi-taoyao`'s `APKBUILD`
+`depends`, matching `device-nothing-spacewar` exactly. Bumped `pkgrel`.
+
+Not yet tested with this fix. Current next step.
