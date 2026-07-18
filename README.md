@@ -675,4 +675,79 @@ attempts given they turned out to have this persistent side effect
 after all — treat each one as having a real (if recoverable) cost, not
 as free experimentation.
 
-Not yet re-tested after this. Current next step.
+### Re-checked the wiki for missed detail, then tried a real flash
+
+Went back to the wiki page and asked more narrowly (exact commands,
+`deviceinfo` values, kernel-format notes, quoting installation/notes
+sections directly) rather than a general summary, to make sure nothing
+was missed. Confirmed there genuinely isn't more there — it's a
+standard MediaWiki device-status page (hardware spec table, feature
+checklist, generic "unlock bootloader / `flash_kernel` / `flash_rootfs`"
+boilerplate templated across all not-yet-merged device pages), not a
+porting guide with an actual `deviceinfo` or format notes included.
+Also checked for the credited wiki contributor (`zstas`)'s actual
+pmaports fork/MR on GitLab — none found; their exact recipe isn't
+published anywhere findable.
+
+One real, usable difference the wiki did confirm: they used
+`pmbootstrap flasher flash_kernel`/`flash_rootfs` (an actual flash), not
+`flasher boot` (RAM-only) like all our attempts so far. Tried it:
+
+```
+fastboot flash boot_a  <-- via `pmbootstrap flasher flash_kernel`, confirmed
+                            it resolves to a plain `fastboot flash boot
+                            <file>` (deviceinfo_flash_fastboot_partition_kernel
+                            unset → defaults to "boot", fastboot auto
+                            -targets the active slot) -- verified this
+                            stays within the safety boundary (raw
+                            overwrite of an existing partition, no
+                            repartitioning) before running it
+```
+
+Result: booted straight back to the **fastboot menu itself**, not our
+kernel, not a silent hang, not stock. A third distinct failure mode.
+Checked slot state immediately after: `slot-unbootable:a: no`, retry
+count only decremented by one (7→6, not exhausted) — the bootloader
+caught the bad image and rejected it cleanly this time, rather than the
+messier auto-fallback-to-B behavior from the RAM-boot attempts. This is
+consistent with (not proof of, but consistent with) the
+compressed-kernel-image-format theory from the previous section: a real
+persistent flash + normal boot hits the *same* instant-rejection outcome
+as the temporary RAM boot did, which argues against "maybe it only fails
+via `fastboot boot` specifically" as an explanation.
+
+**Restored the device to stock before stopping.** Slot A had our
+non-working kernel permanently flashed to it at this point — left as-is,
+any future normal reboot would hit the same rejection and keep consuming
+retries. Reflashed the real stock `boot_a` from `extracted/boot.img`
+(the backup taken at the very start of this whole project), rebooted,
+and verified a full clean normal boot (not just checking `getvar` —
+actually booted to system, confirmed `root` access works). **Device is
+back to its exact original state**, nothing left mid-experiment.
+
+## Status at end of session
+
+Two kernel approaches both got real, substantive progress and both hit
+real blockers:
+
+- **Downstream** (`taoyao-s-oss`): builds cleanly, actually executes and
+  does real hardware bring-up (~1.4s of driver probes visible in
+  `pstore`), but hangs partway through boot in a way that needs a
+  physical serial console to diagnose further — not resolvable from
+  software alone with the tools available this session.
+- **Mainline** (`sc7280-mainline/linux`, already packaged in pmaports):
+  proven working by someone else on this exact device per the wiki, but
+  every attempt here (RAM boot and real flash both) gets rejected before
+  executing any of our kernel's code at all, most likely due to the
+  kernel image being packaged compressed (`vmlinuz`, raw gzip) rather
+  than as a plain bootable `Image` — not yet confirmed, not yet fixed.
+
+Both `pmaports-local/device/testing/device-xiaomi-taoyao/` (currently
+configured for the mainline attempt) and
+`pmaports-local/device/testing/linux-xiaomi-taoyao/` (the downstream
+package, superseded but preserved) are committed and ready to resume
+from. The device itself is fully restored to stock. Next concrete step,
+whenever this is picked back up: investigate whether
+`postmarketos-mkinitfs`/the `mkbootimg`-invoking logic can be made to
+package a plain uncompressed `Image` instead of `vmlinuz`, to directly
+test the compression-format theory.
