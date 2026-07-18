@@ -8,7 +8,7 @@
 # downstreamkernel_prepare/downstreamkernel_package helpers) instead of
 # packaging prebuilt artifacts. Deferred for now to get an installable
 # image faster; revisit once first boot is confirmed working.
-maintainer="taoyao porter <ernar90594@gmail.com>"
+maintainer="Yernar Tursynali <dev@zxc.sx>"
 _flavor="xiaomi-taoyao"
 pkgname=linux-$_flavor
 pkgver=5.4.86
