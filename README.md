@@ -465,9 +465,57 @@ re-ran the `fdtoverlay` merge from README step 6 to produce a new
 Re-synced the checksum in `linux-xiaomi-taoyao`'s `APKBUILD`, bumped
 `pkgrel` again.
 
-Not yet confirmed whether this actually gets USB networking working —
-this is the next thing to verify. If it works, the `extcon`/EUD removal
+### Third `flasher boot` attempt: extcon fix confirmed applied, still no progress
+
+Ran a `pmbootstrap install` that failed partway (`mkfs.ext2: No such
+device or address` on `/dev/installp1` — a stale/flaky loop-device
+mapping left over from a previous run's `/dev/loop0`; `kpartx` didn't
+recreate the partition device node in time). Not persistent — `pmbootstrap
+shutdown` to tear down all chroot mounts/loop devices, then re-running
+`install`, fixed it cleanly. Confirmed nothing had actually been flashed
+to the device at any point during this — `install` failing partway
+doesn't touch the real device at all, only its own local image-building
+chroot.
+
+Diffed this attempt's `pstore` log against the previous one line-by-line
+(`diff`). Confirmed the extcon fix genuinely took effect: the `assume
+cable is not connected` debug line — which came specifically from the
+`dpdm_reg` check inside the `if (of_property_read_bool(node, "extcon"))`
+block we removed — is gone from this log, present in the old one. But
+the fix didn't solve the actual problem: log length, content, and exact
+stall point (`Warning: unable to open an initial console`, ~1.4s in)
+are otherwise near-identical between both attempts, and USB still never
+enumerates. Revised the earlier "probably booted fine, just invisible"
+read — a real successful boot to userspace would normally log at least
+a few more generic messages (mounting rootfs, `Run /init`, a startup
+banner) even at low verbosity; getting *total* silence for 100+ seconds
+straight, twice in a row at nearly identical timing, looks more like
+boot genuinely halting right there.
+
+Found a much more fundamental issue by reading `pmbootstrap`'s own
+flasher code (`pmb/flasher/variables.py`):
+```python
+cmdline_ = deviceinfo.kernel_cmdline or ""
+```
+`deviceinfo_kernel_cmdline` was never set in our `deviceinfo` — meaning
+every boot attempt so far has been running with a **completely empty
+kernel command line**. No `console=`, nothing at all. This alone is a
+very plausible explanation for a console-related stall, independent of
+anything else diagnosed so far.
+
+Fix: set `deviceinfo_kernel_cmdline="console=ttyMSM0,115200n8"`, using
+the real device's own known-correct cmdline value already extracted
+from the stock `vendor_boot.img` back in step 1 — not a guess. Bumped
+`device-xiaomi-taoyao`'s `pkgrel` (deviceinfo changed, not the kernel
+package this time) and re-synced the checksum.
+
+Not yet tested. This is the next thing to verify — and given three
+separate real issues have now been found and fixed across three
+attempts (Haven/Gunyah, extcon/EUD, empty cmdline), each confirmed
+distinct via `pstore` log diffing rather than guessed, there's a
+reasonable chance one or more of these compounds and it may take another
+attempt or two to fully resolve. `extcon`/EUD removal specifically
 should be treated as a bring-up-only workaround worth revisiting later
-(real EUD/TrustZone support would presumably be nicer than force-always
--connected, e.g. for actual USB debugging via EUD), not a permanent fix
-— noting this so it doesn't get forgotten once things are working.
+(real EUD/TrustZone support would presumably be nicer than
+force-always-connected) — noting this so it doesn't get forgotten once
+things are working.

@@ -30,6 +30,14 @@ deviceinfo_header_version="2"
 deviceinfo_rootfs_image_sector_size="4096"
 deviceinfo_flash_sparse="true"
 
+# pmbootstrap passes an EMPTY cmdline if this is unset (confirmed by
+# reading pmb/flasher/variables.py: `cmdline_ = deviceinfo.kernel_cmdline
+# or ""`) -- our kernel has been booting with zero cmdline args this
+# whole time, including no console=. Using the real device's own known
+# -correct value, extracted from the stock vendor_boot.img (see
+# ../../../../README.md step 1 / extracted/unpack_vendor).
+deviceinfo_kernel_cmdline="console=ttyMSM0,115200n8"
+
 # UNVERIFIED: this is an A/B, dynamic-partition (super.img) device, so
 # deviceinfo_super_partitions is very likely required for `pmbootstrap
 # install`/flashing to work, the same way device-nothing-spacewar (same
