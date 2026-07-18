@@ -629,4 +629,50 @@ something ABL could directly run at all.
 Fix: added `systemd-boot` to `device-xiaomi-taoyao`'s `APKBUILD`
 `depends`, matching `device-nothing-spacewar` exactly. Bumped `pkgrel`.
 
-Not yet tested with this fix. Current next step.
+### Real safety incident: repeated `flasher boot` attempts flipped the active A/B slot
+
+Tested the `systemd-boot` fix. `fastboot boot` this time failed
+differently: `Booting FAILED (Status read failed (No such device))` —
+the boot.img was sent successfully, but the USB link dropped mid-command
+as it tried to boot, unlike previous attempts which reported success and
+then just silently hung. Device then visibly rebooted into EvolutionX on
+its own.
+
+Checked `fastboot getvar` afterward and found something important:
+```
+current-slot: b
+slot-unbootable:a: yes
+slot-unbootable:b: no
+```
+**The active A/B slot had switched from A to B, and slot A was marked
+unbootable by the bootloader.** This matters because the whole earlier
+safety plan (see conversation — not written up separately) was built
+around "only ever touch slot A, keep slot B pristine as a guaranteed
+-safe fallback." `pmbootstrap flasher boot` is supposed to be RAM-only
+with no persistent writes, but apparently that guarantee only covers
+the boot payload's *content* — this bootloader still counts repeated
+failed/crashed `fastboot boot` attempts against slot A's persistent
+retry counter, and enough of them exhausted it and triggered the
+standard Android A/B automatic-fallback-on-repeated-failure mechanism.
+
+Recovered cleanly: `fastboot --set-active=a` (metadata-only slot
+pointer change) immediately cleared `slot-unbootable:a` back to `no`
+and reset the retry count to max. Verified slot A's actual *content*
+was never touched (not just the metadata) by doing a real `fastboot
+reboot` into normal Android — booted cleanly, `su` access confirmed
+working. Full recovery confirmed, not just assumed.
+
+**Real process lesson, at real cost:** that verification reboot
+overwrote the `pstore`/`ramoops` buffer (it only holds one prior boot's
+log at a time), destroying the mainline crash log this whole detour was
+trying to capture — the automatic slot-B fallback boot likely already
+overwrote it once before that too. Going forward: grab `pstore`
+**immediately** on the very next boot after any `flasher boot` attempt,
+before doing anything else, including "just double-checking" reboots.
+
+Going forward, also worth minimizing the *number* of raw `flasher boot`
+attempts given they turned out to have this persistent side effect
+after all — treat each one as having a real (if recoverable) cost, not
+as free experimentation.
+
+Not yet re-tested after this. Current next step.
