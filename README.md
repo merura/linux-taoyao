@@ -1016,10 +1016,33 @@ about their firmware version and whether they needed any vbmeta/dtbo
 handling -- their own wiki page and PR history don't document either.
 Response pending as of end of session.
 
-**Device fully restored to stock a final time** (`boot_a`,
-`vendor_boot_a`, `dtbo_a`, `vbmeta_a` all reflashed from `extracted/`
-backups), confirmed booting to EvolutionX normally, Magisk root intact.
-Next concrete step whenever this resumes: either wait for `zstas`'s
-reply, or get physical serial/UART console access -- every
-software-reachable avenue over `fastboot`/`adb` has now been
-exhausted.
+### One more real lead, also tested: a `reserved-memory` size mismatch
+
+Diffed mainline's `sm7325-xiaomi-taoyao.dts` reserved-memory map against
+the actual downstream Xiaomi devicetree source (`kernel-devicetree-taoyao/qcom/yupik.dtsi`,
+real source from session 1's kernel checkout, not a possibly-stale fdt
+dump). Every region matched exactly (`cdsp_mem`, `adsp_mem`,
+`pil_trustedvm_mem`, `qrtr_shmem`, ramoops, etc.) except one:
+`removed_mem` at `0xc0000000` -- downstream declares size `0x5100000`,
+mainline declares `0x6800000`. Real, concrete, verifiable discrepancy,
+and a plausible root cause (wrong reserved-memory size can cause a
+fatal, near-instant conflict during early kernel memory-map setup).
+
+Patched a local copy of the dtb with `fdtput` to match the downstream
+value, rebuilt `boot.img`/`vendor_boot.img` by hand with `mkbootimg`
+(matching the real pipeline's output byte-for-byte otherwise, verified
+via `unpack_bootimg` before flashing), flashed for real: **identical
+instant "Mi logo, ~1s, fastboot" failure.** Ruled out. Restored
+`boot_a`/`vendor_boot_a` to stock afterward (`dtbo_a`/`vbmeta_a` were
+already stock from the previous restore).
+
+**Device fully restored to stock a final time**, confirmed booting to
+EvolutionX normally, Magisk root intact. Every independently-reachable
+lead this session -- boot header version, load addresses, vbmeta/AVB
+(both directions, cross-checked against postmarketOS's own AVB docs),
+Android DTBO overlays (cross-checked against a same-chipset device's
+wiki), RAM-boot vs. real-flash behavior, and now a real
+reserved-memory size discrepancy against the actual downstream
+source -- has been tested and ruled out. Next step: wait for `zstas`'s
+reply, or get physical serial/UART console access. Nothing further is
+reachable purely over `fastboot`/`adb`.
