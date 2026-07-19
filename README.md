@@ -153,16 +153,46 @@ fastboot reboot
 - Each fresh install regenerates SSH host keys — clear the stale entry
   first: `ssh-keygen -R 172.16.42.1`.
 
+## 8. Convenience: SSH keys + passwordless sudo
+
+Optional, but useful once the device is reachable:
+
+```bash
+ssh user@172.16.42.1 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys' < your-github-username.keys
+# (e.g. curl -s https://github.com/<user>.keys as the source of authorized keys)
+
+ssh user@172.16.42.1 'sudo sh -c "echo \"user ALL=(ALL) NOPASSWD: ALL\" > /etc/sudoers.d/user-nopasswd && chmod 440 /etc/sudoers.d/user-nopasswd"'
+```
+
+Note: this lives on `userdata`, so a full reinstall (anything that erases
+`userdata`) wipes it and it needs to be redone. A kernel-only reflash (like
+step 3's fix) does **not** touch this.
+
+## 9. Installing a graphical UI (phosh)
+
+Once the device has any network access (USB gadget to the host, or straight
+WiFi via `nmtui` — both work once you're booted), it's much simpler to
+install a UI on-device with `apk` than to rebuild/reflash:
+
+```bash
+ssh user@172.16.42.1
+sudo apk update
+sudo apk add postmarketos-ui-phosh
+```
+
+This pulls in `phosh`, `phoc`, `feedbackd`, and their dependencies. `apk
+update`/`add` against the `edge/testing` index can be slow/stall-looking on
+first fetch — it's not actually stuck, just give it a minute.
+
+After install, reboot (or start the relevant seat/greetd service) to get the
+graphical session. No `pmbootstrap` rebuild or reflash needed for this step.
+
 ## Known issues (as of this build)
 
 - **Battery**: `qcom-battmgr-bat/usb/wls` uevent failures in dmesg — WIP
   upstream, not fixed in this kernel yet.
 - **Audio**: not present in this kernel branch yet (maintainer is working on
   it separately).
-- **Backlight**: `systemd-backlight@backlight:ae94000.dsi.0.service` fails
-  to restore/save brightness (`Invalid argument`) — cosmetic service
-  failure, does not affect display function once fbdev emulation is
-  enabled.
 - **GPU firmware**: `adreno_request_fw` fails to load `a660_sqe.fw` — no 3D
   acceleration yet.
 
