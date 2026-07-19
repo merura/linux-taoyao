@@ -862,3 +862,164 @@ now reflects every fix above (`header_version=3`, `append_dtb=false`,
 is the correct starting point for next time -- what's still needed is
 either serial console access, or someone else's already-working
 deviceinfo/kernel-signature-quirk to compare against.
+
+## Session 2, continued: the pstore catch-22, dtbo, and a control experiment
+
+Kept digging the same night rather than stopping. Three more real,
+concrete findings, plus a firm conclusion.
+
+### The pstore catch-22
+
+Tried the obvious next move: flash the *downstream* kernel (`Image`
+from session 1, already includes the Haven/Gunyah/extcon/cmdline fixes)
+with this session's now-correct v3/`vendor_boot`/`android-tools`
+pipeline, since it's the one kernel that's ever demonstrably executed
+real driver code on this hardware. Rebuilt `linux-xiaomi-taoyao` +
+`device-xiaomi-taoyao` (swapped `depends` back, added
+`deviceinfo_dtb="qcom/taoyao"` and `deviceinfo_kernel_cmdline` back),
+flashed for real. Result: hung on the Mi logo (not an instant bounce --
+matches session 1's behavior), needed a hard power-off to recover.
+
+Tried to read the hang's `pstore` log the same way as session 1: force
+back to fastboot, reflash stock `boot_a`/`vendor_boot_a`/`vbmeta_a`,
+reboot to EvolutionX, `adb shell su -c cat
+/sys/fs/pstore/console-ramoops-0`. Got a real, substantial log -- but on
+inspection it was **EvolutionX's own prior shutdown sequence**
+(`msm_drm`, `hdcp_2x`, IPA offload, Xiaomi's own debug prints), not the
+downstream kernel's hang at all.
+
+Root cause, now fully understood: this device's `pstore`/`ramoops` only
+allocates a single `console-ramoops-0` record (confirmed via `ls
+/sys/fs/pstore/` -- exactly one file), not a rotating history. Reading
+it requires booting into a kernel capable of mounting pstore and running
+`adb`/`su`, and *that boot itself* overwrites the single record with its
+own console output before the previous kernel's log can be read. This
+isn't fixable by being more careful about warm-vs-cold resets (tested:
+irrelevant) -- it's structural. The only way to see a hung/crashed
+kernel's own log without a physical serial console is if that kernel
+gets far enough to bring up USB networking/`adb`/SSH *before* it stops
+responding, so it can be inspected live, with no intervening reboot.
+Neither the downstream hang nor any mainline attempt ever got that far.
+This matches (and now fully explains) the identical problem flagged in
+session 1's "Real safety incident" section -- it recurred here because
+the *only* way to check `pstore` at all requires the exact reboot that
+destroys it, so it will keep recurring on this device regardless of
+care taken.
+
+To get root back for this (userdata had been wiped earlier in the
+session by `pmbootstrap flasher flash_rootfs`, taking Magisk with it):
+downloaded the real, current Magisk release
+(`github.com/topjohnwu/Magisk`, tag `v30.7`) via the GitHub releases
+API, `adb install`ed it, used its in-app "Direct Install" to re-root
+EvolutionX. Worth remembering `v30.7` is just "whatever was current
+2026-07-19" -- check for a newer tag next time rather than assuming.
+
+### The Motorola Edge 30 (motorola-dubai) lead: `dtbo` and a different vbmeta recipe
+
+Same `SM7325-AE` chipset, different OEM, wiki page has substantially
+more detail than taoyao's own (which is just the generic
+unlock/flash_kernel/flash_rootfs boilerplate). Two concrete new things
+from it:
+
+- **"To prepare the current slot for running mainline, we need to erase
+  Android-specific DTB Overlays and disable AVB."** The `dtbo` partition
+  holds Android-specific device-tree overlays that get merged onto the
+  base devicetree by the bootloader, independent of whatever kernel is
+  in `boot`/`vendor_boot`. Their recipe: `dd if=/dev/zero
+  of=blank.dtbo.img bs=<dtbo-partition-size> count=1` then `fastboot
+  flash dtbo blank.dtbo.img`. Checked our own `dtbo_a` partition size
+  from `fastboot getvar all` earlier this session: `0x1800000` =
+  exactly `25165824` bytes, **identical** to their `bs=25165824` --
+  same chipset generation, same partition layout.
+- A different, simpler vbmeta recipe: `avbtool make_vbmeta_image --flags
+  2 --padding_size 8192 --rollback_index 32` (`--flags 2` =
+  `VERIFICATION_DISABLED` only, not `--flags 3` which also sets
+  `HASHTREE_DISABLED`; higher rollback index for headroom).
+
+Also checked postmarketOS's own `Android Verified Boot (AVB)` wiki
+page for ground truth, which independently confirms something we'd
+already found empirically: **"For unlocked device bootloader skips the
+verification for boot partition, but can still verify others."** -- this
+explains, from the other direction, why toggling vbmeta between stock
+and disabled never changed our `boot`/`vendor_boot` outcome at all: an
+unlocked bootloader was never actually checking `boot`'s signature in
+the first place. `dtbo` verification, however, is *not* skipped the
+same way, which is what makes the dtbo-blanking theory the most
+credible untested lead going into this experiment.
+
+Backed up the real `dtbo_a` first (fastboot doesn't support `fetch` on
+this device, same limitation as `vbmeta_a` earlier -- used `adb shell su
+-c dd if=/dev/block/by-name/dtbo_a of=/data/local/tmp/...` from a
+booted, rooted EvolutionX, then `adb pull`). Saved as
+`extracted/dtbo_a_stock.img`. Built the blank replacement
+(`extracted/blank_dtbo.img`) and the dubai-recipe vbmeta
+(`extracted/vbmeta_a_dubai_recipe.img`).
+
+**Result: flashing mainline kernel + blank `dtbo_a` + the dubai-recipe
+vbmeta together produced the exact same instant "Mi logo, ~1s,
+fastboot" rejection as every previous mainline attempt.** No change.
+Restored `boot_a`, `vendor_boot_a`, `dtbo_a`, and `vbmeta_a` all back to
+their stock backups afterward.
+
+### Control experiment: `fastboot boot` (RAM-only) behaves differently from a real flash
+
+One more data point, non-destructive by construction (RAM boot never
+touches flash storage, so no restore was needed afterward regardless of
+outcome). Ran `pmbootstrap flasher boot` with the same mainline
+kernel/`vendor_boot` pair (stock `dtbo_a`/`vbmeta_a` at this point,
+already restored): instead of the instant Mi-logo-then-fastboot-menu
+bounce every real flash produced, this showed a **black screen for
+~10-15 seconds**, then the bootloader itself fell back to booting
+normally off disk (straight into EvolutionX) -- no manual intervention
+needed, unlike the earlier EvoX-kernel-hybrid test which needed a hard
+power-off to recover from an actual hang.
+
+This is a real, repeatable behavioral difference between `fastboot
+boot` (RAM, temporary) and `fastboot flash` + reboot (persistent) for
+the exact same payload on this device -- worth remembering if this is
+picked up again, since it means "RAM boot" and "real flash" are **not**
+equivalent tests of the same failure here, unlike on most devices.
+Checked `pstore` immediately after landing in EvolutionX anyway, in
+case the extra ~10-15s of runtime left something behind: it didn't --
+`console-ramoops-0` contained EvolutionX's own kernel boot log
+(`Linux version 5.4.233-qgki...`, `Machine model: taoyao based...`),
+confirming the catch-22 above applies here too, regardless of RAM-boot
+vs. real-flash.
+
+### Where this actually stands
+
+Every fixable variable in the boot chain has now been tested and ruled
+out as the cause of the mainline kernel's near-instant failure:
+compression format (raw vs. gzip `Image`), boot header version (v2 vs.
+correct v3), `vendor_boot`/load-address correctness (hand-built vs. the
+real `boot-deploy` pipeline, verified byte-for-byte with
+`unpack_bootimg`), AVB/vbmeta (stock vs. disabled vs. the
+motorola-dubai recipe, and confirmed via postmarketOS's own AVB
+documentation that `boot` verification is skipped entirely on unlocked
+bootloaders anyway), and now Android DTBO overlays (stock vs. blanked).
+None of them changed the outcome. The one thing that *did* change the
+outcome -- swapping in EvolutionX's actual kernel binary while keeping
+everything else about the pipeline identical, which got measurably
+further (a real hang instead of an instant crash) -- points squarely at
+the mainline kernel/devicetree combination itself, on this specific
+unit's current firmware, as the actual remaining problem. And
+`pstore`'s single-record limitation means that failure point is
+fundamentally invisible without a live UART connection: any kernel that
+crashes before bringing up USB networking leaves no readable trace,
+because reading `pstore` requires a subsequent boot that overwrites it
+before it can be read.
+
+Reached out to the actual porter (`zstas`, verified via
+[PR #9](https://github.com/sc7280-mainline/linux/pull/9) as the real
+author of taoyao's upstream devicetree/panel driver) directly, asking
+about their firmware version and whether they needed any vbmeta/dtbo
+handling -- their own wiki page and PR history don't document either.
+Response pending as of end of session.
+
+**Device fully restored to stock a final time** (`boot_a`,
+`vendor_boot_a`, `dtbo_a`, `vbmeta_a` all reflashed from `extracted/`
+backups), confirmed booting to EvolutionX normally, Magisk root intact.
+Next concrete step whenever this resumes: either wait for `zstas`'s
+reply, or get physical serial/UART console access -- every
+software-reachable avenue over `fastboot`/`adb` has now been
+exhausted.

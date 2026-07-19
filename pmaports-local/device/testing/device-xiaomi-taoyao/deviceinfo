@@ -11,6 +11,7 @@ deviceinfo_dtb="qcom/sm7325-xiaomi-taoyao"
 deviceinfo_append_dtb="false"
 deviceinfo_arch="aarch64"
 deviceinfo_flash_kernel_on_update="true"
+deviceinfo_kernel_cmdline="console=ttyMSM0,115200n8"
 
 # Device related
 deviceinfo_drm="true"
@@ -33,18 +34,23 @@ deviceinfo_bootimg_custom_args="--base 0x00000000 --kernel_offset 0x00008000 --r
 
 # Switched from our own from-scratch downstream (taoyao-s-oss) kernel to
 # the maintained mainline fork (github.com/sc7280-mainline/linux, already
-# packaged in pmaports as linux-postmarketos-qcom-sc7280) after getting
-# stuck on a boot hang that needed a serial console to diagnose further.
-# The postmarketOS wiki confirms taoyao boots on this mainline kernel
-# with display/touch/WiFi/network/modem working, and it already ships
+# packaged in pmaports as linux-postmarketos-qcom-sc7280). The
+# postmarketOS wiki confirms taoyao boots on this mainline kernel with
+# display/touch/WiFi/network/modem working, and it already ships
 # arch/arm64/boot/dts/qcom/sm7325-xiaomi-taoyao.dts, wired into that
 # package's build (dtb-$(CONFIG_ARCH_QCOM) += sm7325-xiaomi-taoyao.dtb in
-# its Makefile). Deliberately not setting deviceinfo_kernel_cmdline here
-# (unlike the abandoned downstream attempt) -- device-nothing-spacewar,
-# on the same kernel package, doesn't set one either, so trusting
-# pmOS/mainline's own defaults. See ../../../../README.md for the full
-# downstream history (preserved, not deleted) and
-# ../../../../TODOs/dual-build.md.
+# its Makefile).
+#
+# header_version=3 (not 2!), append_dtb=false, and bootimg_custom_args
+# with explicit load addresses are all real, confirmed-necessary fixes
+# -- see ../../../../README.md's "Session 2" sections for exactly why
+# each one was wrong before and how it was diagnosed. As of session 2's
+# end, this produces a byte-verified-correct boot.img/vendor_boot.img
+# pair via the real, unmodified pmOS pipeline, but the mainline kernel
+# still crashes within ~1s of getting control on this specific unit --
+# not a boot-chain/packaging problem, needs a serial console (or
+# upstream porter input) to diagnose further. See ../../../../README.md
+# and ../../../../TODOs/dual-build.md.
 
 # UNVERIFIED: this is an A/B, dynamic-partition (super.img) device, so
 # deviceinfo_super_partitions is very likely required for `pmbootstrap

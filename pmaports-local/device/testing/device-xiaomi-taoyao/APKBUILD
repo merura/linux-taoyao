@@ -3,7 +3,7 @@ maintainer="Yernar Tursynali <dev@zxc.sx>"
 pkgname=device-xiaomi-taoyao
 pkgdesc="Xiaomi 12 Lite 5G"
 pkgver=1
-pkgrel=6
+pkgrel=9
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"
@@ -28,5 +28,5 @@ package() {
 }
 
 sha512sums="
-cd881b772082a177f252a6fbd69981f3bca8cd11970edabbdbbae75b5ca09da3fb7e41e3649af6fa4e13d6ca9890e91c5a753f5a753f96737a6eaac43f6b692a  deviceinfo
+9d543b056955fc801d5b38c6aba48001b7413150dcc06f5e1a9e351c14829e51e68f5eeae7af133365d99b4e14c9008a52c8f1824afb895fd00f16d5d1007086  deviceinfo
 "
