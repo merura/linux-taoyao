@@ -1036,13 +1036,42 @@ instant "Mi logo, ~1s, fastboot" failure.** Ruled out. Restored
 `boot_a`/`vendor_boot_a` to stock afterward (`dtbo_a`/`vbmeta_a` were
 already stock from the previous restore).
 
+### Compression format, retested under the now-correct v3 pipeline
+
+The very first theory from earlier this session (raw vs. gzip `Image`)
+had only ever been tested under the *wrong* header v2 format, before
+v3/`vendor_boot` were fixed. Retested properly this time: built
+`boot.img`/`vendor_boot.img` with the raw, uncompressed `Image` (same
+one used in the EvoX-kernel-hybrid control test) under the fully
+correct v3 pipeline (right addresses, right dtb, right cmdline).
+**Identical instant failure.** Compression format is now definitively
+ruled out under all conditions, not just the ones tested earlier.
+
+### The UEFI/`linux.efi` path: considered, not attempted
+
+This device reports `kernel:uefi` in `fastboot getvar all`, and the
+kernel package builds a `linux.efi` ZBOOT stub specifically for UEFI
+booting, alongside `vmlinuz`. Some newer pmOS devices
+(`xiaomi-pipa`, a Snapdragon 8 Gen 2 tablet) skip Android bootimg
+entirely and boot via a FAT32 ESP + `systemd-boot` + `linux.efi`
+instead. Considered as a genuinely untested structural alternative, but
+checked precedent first: **every currently-working SM7325 pmOS device
+(`device-nothing-spacewar`) uses the classic Android-bootimg scheme**,
+not this one -- `xiaomi-pipa`'s ESP scheme is on a meaningfully newer
+SoC generation with a different ABL implementation. No known precedent
+of ESP-style boot working on any SM7325 device. Documented as a
+low-probability long shot in `TODOs/uefi-esp-boot-longshot.md` rather
+than attempted, given the lack of precedent and the size of the lift
+(no existing recipe to copy, would be genuinely new work).
+
 **Device fully restored to stock a final time**, confirmed booting to
 EvolutionX normally, Magisk root intact. Every independently-reachable
 lead this session -- boot header version, load addresses, vbmeta/AVB
 (both directions, cross-checked against postmarketOS's own AVB docs),
 Android DTBO overlays (cross-checked against a same-chipset device's
-wiki), RAM-boot vs. real-flash behavior, and now a real
-reserved-memory size discrepancy against the actual downstream
-source -- has been tested and ruled out. Next step: wait for `zstas`'s
-reply, or get physical serial/UART console access. Nothing further is
-reachable purely over `fastboot`/`adb`.
+wiki), kernel compression format (retested under the correct pipeline),
+RAM-boot vs. real-flash behavior, and a real reserved-memory size
+discrepancy against the actual downstream source -- has been tested and
+ruled out. Next step: wait for `zstas`'s reply, or get physical
+serial/UART console access. Nothing further is reachable purely over
+`fastboot`/`adb`.
