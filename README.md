@@ -751,3 +751,114 @@ whenever this is picked back up: investigate whether
 `postmarketos-mkinitfs`/the `mkbootimg`-invoking logic can be made to
 package a plain uncompressed `Image` instead of `vmlinuz`, to directly
 test the compression-format theory.
+
+## Session 2: real root causes found, mainline kernel still crashes instantly
+
+Picked back up with real `sudo` access to pmbootstrap (fixes the earlier
+`mkfs.ext2`/stale-loop-device install failures for good) and worked
+through the compression theory above -- and several bigger, real bugs
+past it. In order of discovery:
+
+**The compression theory was wrong.** Decompressed `vmlinuz` to a raw
+`Image` locally (`gunzip`), rebuilt `boot.img` by hand with it, flashed
+for real: identical instant rejection. The kernel package's own comment
+(`"Old GZIP'd kernel image for boot.img compatibility"`) turned out to
+be accurate -- gzip is fine, `nothing-spacewar` boots the same package
+the same way.
+
+**`deviceinfo_header_version="2"` was flatly wrong.** Copied from
+`device-nothing-spacewar` early on and never actually checked against
+this device. Re-ran `unpack_bootimg` on our *own* stock `boot.img`
+backup (extracted at the very start of this project) and it says,
+unambiguously: `boot image header version: 3`. Header v2 is a single
+combined image; v3 splits `boot.img` (kernel only) from a separate
+`vendor_boot.img` (dtb + vendor ramdisk + vendor cmdline) -- this device
+has always had a real `vendor_boot_a`/`vendor_boot_b` partition pair
+that we'd never touched. Flashing a v2-shaped image to a v3-only
+bootloader explains the perfectly consistent, payload-independent,
+~1-second rejection we kept seeing.
+
+**Xiaomi enforces AVB (vbmeta) verification even unlocked.**
+`fastboot getvar secure` reports `yes`. Dumped the real stock
+`vbmeta_a` via `adb shell su -c dd` (fastboot on this device doesn't
+support `fetch`, so this was the only way to get a real backup --
+saved as `extracted/vbmeta_a_stock.img`), built a
+verification-and-hashtree-disabled replacement with `avbtool
+make_vbmeta_image --flags 3`. Also found `anti:1` in `getvar all`
+(anti-rollback index) and had to pass `--rollback_index 1` to match it
+-- a default-0 vbmeta gets silently rejected by TrustZone independently
+of the AVB hash checks. **Later disproven as the blocker for this
+specific failure** (see below) but both fixes are real and were needed
+to get anywhere -- kept as part of the device config.
+
+**pmbootstrap's own pipeline already fully supports header v3/v4**
+(`boot-deploy`, part of `postmarketos-base`, invoked via
+`postmarketos-mkinitfs`) -- we just weren't using it, and had been
+hand-building images with `mkbootimg` ourselves, which turned out to
+have real mistakes: our by-hand images put the real initramfs in
+`boot.img`'s generic ramdisk slot; the actual pipeline puts the *entire*
+real initramfs into `vendor_boot`'s `--vendor_ramdisk` instead, leaving
+`boot.img` with no ramdisk at all. Fixing `deviceinfo_header_version` to
+`"3"` and rebuilding surfaced two more concrete bugs on the way to a
+correct build:
+- `deviceinfo_generate_bootimg="true"` requires the `android-tools`
+  package specifically (real Google `mkbootimg` with `--vendor_boot`
+  support) -- our `APKBUILD` depended on the generic `mkbootimg` virtual,
+  which resolves to `mkbootimg-osm0sis` and doesn't support v3/v4 at
+  all. Fixed: `depends=` now lists `android-tools`.
+- `deviceinfo_append_dtb="true"` (also copied from `nothing-spacewar`,
+  a v2 device) made `boot-deploy` append the dtb directly onto the
+  kernel blob even under header v3, where the dtb only belongs in
+  `vendor_boot`. Fixed: `deviceinfo_append_dtb="false"`.
+- For header v3/v4, `boot-deploy`'s `mkbootimg` invocation does **not**
+  forward any of `deviceinfo_flash_offset_*` -- only
+  `${deviceinfo_bootimg_custom_args}`. Without it, `mkbootimg` silently
+  falls back to its own default base (`0x10000000`), producing a
+  `vendor_boot.img` with `kernel load address: 0x10008000` instead of
+  this device's real `0x00008000` (same +0x10000000 bug hit the dtb
+  address too). Fixed by setting `deviceinfo_bootimg_custom_args="--base
+  0x00000000 --kernel_offset 0x00008000 --ramdisk_offset 0x01000000
+  --tags_offset 0x00000100 --dtb_offset 0x01f00000"` explicitly.
+  Verified afterwards with `unpack_bootimg` that the generated
+  `vendor_boot.img` has the exact correct addresses.
+
+With all of the above fixed and a `boot.img`/`vendor_boot.img` pair
+built entirely by the real, unmodified pmOS pipeline (not hand-crafted):
+**still an identical instant rejection.** To isolate the variable
+further, swapped in EvolutionX's own (stock, known-working) kernel
+binary in place of the mainline one, keeping our pmOS initramfs --
+this got meaningfully further: the device hung on the Mi splash logo
+(needing a hard power-reset) instead of instantly bouncing back to
+fastboot. That is a real, different failure mode, and it isolates the
+problem to the mainline kernel/dtb combination itself, not the image
+format -- confirmed further by re-testing with **stock vbmeta
+(verification re-enabled)** against our correctly-formatted mainline
+v3 image: identical instant rejection either way, proving vbmeta was
+never actually the blocker for this particular failure.
+
+**Conclusion:** the boot image pipeline is now provably correct (real
+pmOS tooling, verified load addresses, vbmeta ruled out as a variable).
+The mainline kernel (`sc7280-mainline/linux` tag `v7.1.2-sc7280`,
+confirmed to actually contain the merged taoyao devicetree from
+[PR #9](https://github.com/sc7280-mainline/linux/pull/9)) crashes within
+about a second of being handed control -- before UART/framebuffer even
+come up, too fast to leave anything in `pstore`. This class of failure
+(near-instant crash at kernel entry) is consistent with a PSCI/EL2
+hypervisor handshake problem specific to this device's Gunyah/TrustZone
+state, the same category of issue (just earlier/more fatal) that the
+downstream-kernel `Haven`/`Gunyah` hang from session 1 ran into. Reached
+the same wall as session 1: further diagnosis needs a physical
+serial/UART console, not resolvable purely over `fastboot`/`adb` with
+the tools available here. The wiki author (`zstas`, verified as the
+actual PR #9 author) never published deviceinfo/flashing specifics
+beyond what's already reflected here -- likely because they have serial
+console access on their own unit.
+
+**Device fully restored to stock again** (`boot_a`, `vendor_boot_a`,
+`vbmeta_a` all reflashed from the `extracted/` backups, confirmed
+booting to EvolutionX normally). `pmaports-local/device/testing/device-xiaomi-taoyao/deviceinfo`
+now reflects every fix above (`header_version=3`, `append_dtb=false`,
+`bootimg_custom_args` with correct offsets, `android-tools` dependency) and
+is the correct starting point for next time -- what's still needed is
+either serial console access, or someone else's already-working
+deviceinfo/kernel-signature-quirk to compare against.

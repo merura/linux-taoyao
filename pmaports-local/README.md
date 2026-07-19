@@ -37,6 +37,19 @@ they're independent of which kernel is running.
   to that device's layout, not something safe to guess. Determine the
   real value on-device before attempting to flash (see the comment in
   `deviceinfo` for the commands to check).
-- Not yet flashed for real — only `pmbootstrap flasher boot` (RAM-only,
-  non-destructive) attempted so far, and not yet with the new mainline
-  `deviceinfo`/`APKBUILD`. This is the current next step.
+- **Flashed for real, repeatedly, in session 2 — boots the bootloader's
+  own splash then instantly dies.** `deviceinfo_header_version="3"` (not
+  `"2"` — that was a real bug, fixed in session 2 after confirming via
+  `unpack_bootimg` on our own stock `boot.img` backup that this device
+  is header v3, split `boot_a`/`vendor_boot_a`), `append_dtb="false"`,
+  `bootimg_custom_args` set with the correct load addresses (boot-deploy
+  doesn't forward `flash_offset_*` for header v3/v4, only
+  `bootimg_custom_args` — without it `mkbootimg` silently defaults to
+  the wrong base), and `android-tools` in `depends` (the generic
+  `mkbootimg` virtual resolves to `mkbootimg-osm0sis`, which doesn't
+  support v3/v4 at all). All of this produces a real, pipeline-verified,
+  correctly-addressed `boot.img`/`vendor_boot.img` pair — and it still
+  crashes within ~1 second of getting control, before UART/framebuffer
+  come up. See the top-level `../README.md` "Session 2" section for the
+  full isolation work (vbmeta ruled out, EvoX-kernel comparison test)
+  and why this now needs a physical serial console to go further.
