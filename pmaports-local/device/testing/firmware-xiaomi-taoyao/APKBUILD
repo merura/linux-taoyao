@@ -1,0 +1,126 @@
+# Maintainer: Jens Reidel <adrian@travitia.xyz>
+# Reference: <https://postmarketos.org/devicepkg>
+
+pkgname=firmware-xiaomi-taoyao
+pkgver=1
+pkgrel=0
+pkgdesc="Firmware for Xiaomi 12 Lite 5G"
+subpackages="
+	$pkgname-adsp
+	$pkgname-cdsp
+	$pkgname-gpu
+	$pkgname-ipa
+	$pkgname-modem
+	$pkgname-sensors
+	$pkgname-vpu
+	$pkgname-wpss
+	"
+url="https://github.com/zstas/firmware-xiaomi-taoyao"
+arch="aarch64"
+license="proprietary"
+options="!check !strip !archcheck !tracedeps pmb:cross-native"
+_commit="fb9b96ddd6e96398d9d70563f71f15a85dac9566"
+source="
+	$pkgname-$_commit.tar.gz::$url/archive/$_commit/$pkgname-$_commit.tar.gz
+	adsp.files
+	cdsp.files
+	gpu.files
+	ipa.files
+	modem.files
+	sensors.files
+	vpu.files
+	wpss.files
+"
+builddir="$srcdir/$pkgname-$_commit"
+
+package() {
+	# parent package is empty
+	mkdir -p "$pkgdir"
+}
+
+# Helper method for installing firmware files from a text file
+install_files() {
+	cd "$builddir"
+
+	while IFS="" read -r _i || [ -n "$_i" ]; do
+		[ ! -d $(dirname $_i) ] && mkdir -p $(dirname $_i)
+		echo $_i
+		install -Dm644 $_i "$subpkgdir/$_i"
+	done < "$srcdir/$1"
+}
+
+adsp() {
+	pkgdesc="Xiaomi 12 Lite 5G adsp firmware"
+
+	mkdir "$subpkgdir"
+	install_files "adsp.files"
+}
+
+cdsp() {
+	pkgdesc="Xiaomi 12 Lite 5G cdsp firmware"
+
+	mkdir "$subpkgdir"
+	install_files "cdsp.files"
+}
+
+gpu() {
+	pkgdesc="Xiaomi 12 Lite 5G gpu firmware"
+
+	mkdir "$subpkgdir"
+	install_files "gpu.files"
+}
+
+ipa() {
+	pkgdesc="Xiaomi 12 Lite 5G ipa firmware"
+
+	mkdir "$subpkgdir"
+	install_files "ipa.files"
+}
+
+modem() {
+	pkgdesc="Xiaomi 12 Lite 5G modem firmware"
+
+	mkdir "$subpkgdir"
+	install_files "modem.files"
+}
+
+sensors() {
+	pkgdesc="Xiaomi 12 Lite 5G sensors firmware"
+
+	mkdir "$subpkgdir"
+	install_files "sensors.files"
+
+	# Remove files that we don't need - for now
+	rm -r "$subpkgdir"/usr/share/qcom/sm7325/Xiaomi/taoyao/acdb/
+	rm -r "$subpkgdir"/usr/share/qcom/sm7325/Xiaomi/taoyao/dsp/
+
+	find "$subpkgdir/usr/share/qcom/sm7325/Xiaomi/taoyao/" \
+		-type f -exec chmod 0644 {} \;
+}
+
+vpu() {
+	pkgdesc="Xiaomi 12 Lite 5G vpu firmware"
+
+	mkdir "$subpkgdir"
+	install_files "vpu.files"
+}
+
+wpss() {
+	pkgdesc="Xiaomi 12 Lite 5G wpss firmware"
+
+	mkdir "$subpkgdir"
+	install_files "wpss.files"
+}
+
+
+sha512sums="
+3915fc87b50a710382eedad068d3d9fc747f9372537bb063d783653c915fc5aa188dffdc92b9dd59db558c67c6776c84a7e20047a76b8ec5ae4c49e4f6abeb45  firmware-xiaomi-taoyao-fb9b96ddd6e96398d9d70563f71f15a85dac9566.tar.gz
+570b74c92a57a29fed833d4b81e963dac24a3c43dccb05aa533b08fe0b8db5ae3131178e10f322bcdf348c3084476ee8108ee9ad6e2f72207d1c95deaf1bebaa  adsp.files
+6e6be853ac8db85cc5db5d925923d9c84b711f8f4e7e99416e9260356d6441dc418ba6067851cb3197497d06774f0ac139a12eb4a514314fc95c3935c823e624  cdsp.files
+81eba7a133b6ea5472f8a2a8dc5ac004429f59c11321e9602cdecf2819ac88139529d41452f31a4eaae0069dbe1b3ce6d41ed253b68f968b753bc56c78e97f65  gpu.files
+9d7e90edde50a8c096fdcfdf428d5bcbc6cb6d562f595eddb6cd78317f4f5b962f1cfd54ded6426c792c594bdd3dc3b9e52c93a19fcc4064d9354fad2744f36d  ipa.files
+f1fed14ebc89f93d28449aef4eeb450eda7a28b650c84cb7a192110af4f7145326d400d56171fce7f575b9a4aca4c057ea28fd1b47425723f0a56091a8deee73  modem.files
+ba3810be3ba1723b77a419fe7f5c0b6214546088eeaea186d5882754dcaca374c440b02b8a91f16a4fe4a76502f97ac718a78d864f4a120851c7c4078c0c089b  sensors.files
+07cd168a7a6e1d63aab90126ede66bd9bc88112222a935fc0e689ccfad459753e24ce4bfeb6299145f31073a6c570f1615c7374b30c8185b4a5c59f75c66ca6e  vpu.files
+d1617543151e645457d224bf41ef47c129bdea02854538a281814017974644dd1ad2cc33aaef926ca215b1c32cb238d380bade0bbd8020d1b402ebb4bbd6170b  wpss.files
+"

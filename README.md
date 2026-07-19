@@ -1036,6 +1036,20 @@ instant "Mi logo, ~1s, fastboot" failure.** Ruled out. Restored
 `boot_a`/`vendor_boot_a` to stock afterward (`dtbo_a`/`vbmeta_a` were
 already stock from the previous restore).
 
+**Correction, found later the same session:** this "discrepancy" was
+already known and already fixed upstream -- not a live bug. Checked
+[PR #9](https://github.com/sc7280-mainline/linux/pull/9)'s force-push
+history directly: the `0x5100000` value (the one we patched *to*,
+matching downstream) is the state from the July 22, 2025 force-push,
+*before* zstas's own August 17, 2025 fix, whose commit message says
+verbatim: `"Added Signed-off-by, rebased to sc7280-6.16.y. Also, fixed
+1 typo in removed-mem node (was wrong size)."` The post-fix value,
+`0x6800000`, is what's in the actual merged commit and every release
+tag since -- i.e. what we'd already been testing with by default all
+along. So this session tested *both* the known-bad pre-fix value and
+the correct post-fix value, back to back, with identical results
+either way. Cleanly and doubly ruled out, not a lingering suspicion.
+
 ### Compression format, retested under the now-correct v3 pipeline
 
 The very first theory from earlier this session (raw vs. gzip `Image`)
@@ -1075,3 +1089,180 @@ discrepancy against the actual downstream source -- has been tested and
 ruled out. Next step: wait for `zstas`'s reply, or get physical
 serial/UART console access. Nothing further is reachable purely over
 `fastboot`/`adb`.
+
+## Session 2, part 3: the regulator lead, the real answer from zstas, and where the build stands
+
+More testing the same night, plus direct word from the actual porter --
+the single most valuable thing that happened this session.
+
+### `regulator-allowed-modes`/`regulator-allow-set-load` on the UFS VCC rail
+
+Diffed taoyao's dts against `sm7325-nothing-spacewar.dts` (the proven
+reference device) node-by-node. Found `vreg_l7b_2p96` -- explicitly
+commented `/* Constrained for UFS VCC, at least until UFS driver scales
+voltage */`, i.e. the storage controller's power rail -- is missing
+`regulator-allowed-modes` and `regulator-allow-set-load` in taoyao's
+current dts, while spacewar's equivalent regulator has both. Patched a
+local dtb copy with `fdtput` to add both properties with spacewar's
+exact values, flashed for real: **identical instant failure.** Ruled
+out, but cleanly (matched the known-working reference exactly, still
+failed) -- unlike the removed-mem case this wasn't a rediscovery of an
+already-fixed value, just a real dead end.
+
+### Retested `v6.17.0-sc7280` specifically (the version the wiki cites)
+
+The taoyao wiki page states `pmOS kernel: 6.17.0` as tested/confirmed.
+All prior testing this session used `v7.1.2-sc7280`, a later tag.
+Downloaded and built `v6.17.0-sc7280` from source specifically (not in
+the prebuilt binary repo), fixed one build issue along the way (the
+`linux7.0-resolve_btfids-...patch` doesn't apply to this kernel
+version -- dropped it, it's a `resolve_btfids` BPF-tooling-only patch,
+zero effect on runtime). Flashed the resulting kernel for real:
+**identical instant failure to `v7.1.2`.**
+
+**Important correction:** `v6.17.0-sc7280` was tagged 2026-10-03,
+*after* zstas's 2025-08-17 force-push that rebased PR #9 onto
+`sc7280-6.16.y`. So this was never actually a "pre-rebase" test --
+just a different post-rebase snapshot. Also used this build to
+conclusively retest the raw-vs-gzip `Image` question one more time
+under this kernel version: no difference, as expected.
+
+### The real pre-rebase test, and correcting the removed-mem finding
+
+Went back to [PR #9](https://github.com/sc7280-mainline/linux/pull/9)'s
+timeline via the GitHub API (`head_ref_force_pushed` events) to find
+the actual pre-rebase commit: `af9b3fad9d9a9040f3507da7cb1ec98b9a76fc32`
+(2025-07-22, on `zstas/sm6115_mainline`, the fork PR #9 was made from --
+the `sc7280-mainline/linux` codeload tarball endpoint was rate-limited
+after the earlier large downloads this session, worked around with
+`git fetch --depth=1` from the fork directly instead). Built and
+flashed this exact commit for real: **identical instant failure.**
+
+This same investigation also fully resolved the earlier
+"reserved-memory size discrepancy" finding with much more precision.
+zstas's 2025-08-17 force-push comment says verbatim: *"Added
+Signed-off-by, rebased to sc7280-6.16.y. Also, fixed 1 typo in
+removed-mem node (was wrong size)."* Diffing the pre-rebase
+(`af9b3fad9`) and post-rebase (`6d3de968542e...`, the actual merged
+commit) taoyao.dts directly: the pre-rebase value was `0x5100000`
+(matching generic downstream `yupik.dtsi` -- and matching what this
+session originally "fixed" it to, thinking that was the correction) and
+the post-rebase, currently-merged value is `0x6800000`. So this
+session tested *both* the confirmed-buggy pre-fix value and the
+confirmed-correct post-fix value, back to back, with identical crash
+either way. Genuinely, doubly ruled out now, not a lingering
+suspicion -- and the earlier README section describing this as an open
+lead has been superseded by this one.
+
+### zstas replied -- and gave the actual answer
+
+Reached out via Telegram (not GitHub) given a shared personal
+connection. Direct quote, translated: *"What's currently in
+sc7280-mainline is missing a patch for the battery, and that's why it
+hangs. Take this branch instead:
+[`upstream_panel`](https://github.com/zstas/sm6115_mainline/tree/upstream_panel)
+-- no audio yet, but closest to the mainline patch that got merged."*
+Confirmed later in the same conversation: *"I just haven't packaged it
+for pmOS yet because without the battery patch everything hangs
+completely dead after a couple seconds"* -- which is exactly this
+session's symptom, described independently by the person who's
+actually run this hardware. Also explained *why* it's not in the
+official `sc7280-mainline` repo: the maintainer (Luca Weiss) wants the
+battery fix submitted upstream to the real Linux kernel mailing list
+first, rather than merged as a fork-only patch, and it's only been a
+few days since the base panel patch itself landed.
+
+Fetched branch HEAD `50ab7f30c1518db7a48752e65469e2315e51aaf0`
+(2026-06-24) the same way as the pre-rebase test (`git fetch --depth=1`
+from the fork, GitHub's tarball endpoint still rate-limited). Confirmed
+taoyao's dts is present and wired into the build. This is the kernel
+source this session should have been building all along, per direct
+word from the actual person who's booted this exact hardware
+successfully.
+
+### The real, complete device package -- also from zstas (via Telegram file share)
+
+Separately, zstas shared a real `git format-patch` output
+(`reference/taoyao-full-devicepkg-danila-eugene.patch`, 19 files,
+authored 2025-07-09 by Danila Tikhonov and Eugene Lepshy, not zstas
+directly -- evidently a broader small team effort) containing a
+complete, real pmaports submission for taoyao:
+- `device/testing/device-xiaomi-taoyao/` -- a full deviceinfo +
+  APKBUILD + UCM audio config (`ucm/taoyao.conf`, `ucm/HiFi.conf`) +
+  hexagonrpcd config + udev rules for the accelerometer mount matrix.
+  **Its `deviceinfo_header_version="0"` with `append_dtb="true"`** --
+  a completely different, older/simpler boot format (no `vendor_boot`
+  split at all) than the `header_version="3"` this session verified
+  directly against the real stock `boot.img` via `unpack_bootimg`
+  earlier tonight. Not adopted as the primary approach for that reason
+  (this session's v3 finding is a direct, first-party measurement of
+  this exact unit's actual stock firmware, not something to override
+  on a different document's say-so) but flagged as a real fallback to
+  try if the `upstream_panel` kernel still doesn't boot under v3.
+  Real, useful, previously-unverified value from this file:
+  `deviceinfo_super_partitions="/dev/sda20 /dev/sda20"` (commented out
+  in their version too, but a concrete real value rather than a blind
+  guess).
+- `device/testing/firmware-xiaomi-taoyao/` -- a real, dedicated
+  firmware-blob package (adsp/cdsp/gpu/ipa/modem/sensors/vpu/wpss),
+  sourced from `github.com/zstas/firmware-xiaomi-taoyao` (maintainer:
+  Jens Reidel -- a third contributor). **Applied and built
+  successfully this session** (`pmbootstrap build firmware-xiaomi-taoyao`,
+  ~10s, no compilation needed, just packaging real firmware blobs).
+  Genuinely new capability this project didn't have before -- none of
+  tonight's or session 1's boot attempts included real DSP/modem/sensor
+  firmware at all.
+- `device/testing/linux-xiaomi-taoyao/` -- a kernel package pinned to
+  the *exact same* `50ab7f30c...` commit as the `upstream_panel`
+  branch, but using **a dedicated `config-xiaomi-taoyao.aarch64`**
+  instead of the generic community `config-postmarketos-qcom-sc7280.aarch64`
+  this session used for every build tonight. Diffed the two configs
+  directly: no battery/power-supply/pmic_glink-related differences
+  (confirming the actual fix is the source-level battery driver patch
+  in the `upstream_panel` branch commit itself, not a config setting),
+  but ~1830 lines of other differences overall -- not yet reviewed in
+  detail. Saved to `reference/config-xiaomi-taoyao.aarch64` for future
+  use; worth switching to once a boot succeeds, for whatever other
+  device-specific tuning it contains.
+
+### Where the build actually stands (important -- lost work, not yet re-verified)
+
+Set up a from-source build of the `upstream_panel` branch
+(`linux-postmarketos-qcom-sc7280` pinned to `50ab7f30c...`, source
+tarball built locally via `git fetch --depth=1` since GitHub's codeload
+tarball endpoint was rate-limited after several large downloads this
+session, placed directly in `~/.local/var/pmbootstrap/cache_distfiles/`).
+
+First build attempt compiled cleanly for a full hour and failed only at
+the very last step: `pahole` segfaulting while generating BTF debug
+info (`Failed to generate BTF for vmlinux`) -- a build-tooling issue
+completely unrelated to kernel functionality. Disabled
+`CONFIG_DEBUG_INFO_BTF`/`CONFIG_DEBUG_INFO_BTF_MODULES` directly in the
+chroot's `.config` and re-ran `make` by hand to reuse the ~1hr of
+already-compiled object files rather than rebuilding from scratch.
+
+**Mistake made and worth remembering:** started the
+`firmware-xiaomi-taoyao` package build concurrently in the same native
+chroot while the kernel rebuild was still running in the background,
+thinking the low CPU load meant it was safe. It wasn't -- every
+`pmbootstrap build` invocation wipes `/home/pmos/build` fresh as part
+of its own lifecycle, and doing so mid-kernel-build destroyed the
+entire hour-plus of cached kernel compilation progress. The firmware
+package itself built fine (unaffected, it's a separate, fast,
+non-compiling package), but the kernel build was lost and needs to be
+restarted from scratch. **Never run two `pmbootstrap build`/`pmbootstrap
+chroot` invocations against the same chroot concurrently, regardless of
+apparent CPU headroom** -- the shared `/home/pmos/build` directory
+lifecycle is the actual constraint, not CPU contention.
+
+**Next step, in order:** rebuild `linux-postmarketos-qcom-sc7280`
+pinned to `upstream_panel` (`50ab7f30c...`) from scratch, this time
+with `CONFIG_DEBUG_INFO_BTF` disabled from the start to avoid the
+pahole segfault, and *not* running anything else in the same chroot
+concurrently. Flash and test -- this is the version directly confirmed
+by the actual porter to have the working battery-hang fix. If it
+still fails, fall back to trying `deviceinfo_header_version="0"` +
+`append_dtb="true"` (the older, no-`vendor_boot` format from the
+Danila/Eugene device package) as the next untested variable, since
+every `header_version="3"` combination has now been exhaustively
+tested and ruled out this session.
