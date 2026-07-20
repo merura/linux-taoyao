@@ -9,6 +9,7 @@
 # creates /dev/fb0 and the screen stays black after the bootloader hands off.
 { mobile-nixos
 , fetchFromGitHub
+, buildPackages
 , ...
 }:
 
@@ -26,4 +27,11 @@ mobile-nixos.kernel-builder {
   # The pmOS config builds modules (CC [M] ...), so keep them.
   isModular = true;
   isCompressed = "gz";
+
+  # drivers/gpu/drm/msm/registers/gen_header.py is invoked by the build
+  # (Adreno register header generation) and needs python3 on the build
+  # host. The postmarketOS APKBUILD for this exact kernel declares python3
+  # as a makedepend for the same reason; mobile-nixos' kernel-builder does
+  # not include it by default.
+  nativeBuildInputs = [ buildPackages.python3 ];
 }

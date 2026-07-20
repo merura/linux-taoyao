@@ -22,9 +22,28 @@
 
       pkgs = import nixpkgs { system = buildSystem; };
 
+      # Fix cross-compilation of the kernel.
+      #
+      # kernel/builder.nix hands the *target* `writeShellScript` to
+      # eval-config.nix, so the generated config-validator snippet gets a
+      # shebang pointing at aarch64 bash. That script runs on the build host
+      # during the kernel's configurePhase, so it dies with
+      # "bad interpreter: No such file or directory" (exit 126).
+      # `buildPackages` is already in scope there; just use it.
+      mobile-nixos-src = pkgs.applyPatches {
+        name = "mobile-nixos-cross-fix";
+        src = mobile-nixos;
+        postPatch = ''
+          substituteInPlace overlay/mobile-nixos/kernel/builder.nix \
+            --replace-fail \
+              'inherit lib path version writeShellScript;' \
+              'inherit lib path version; writeShellScript = buildPackages.writeShellScript;'
+        '';
+      };
+
       device = ./devices/xiaomi-taoyao;
 
-      eval = (import "${mobile-nixos}/lib/release-tools.nix" {
+      eval = (import "${mobile-nixos-src}/lib/release-tools.nix" {
         inherit pkgs;
       }).evalWith {
         inherit device;
