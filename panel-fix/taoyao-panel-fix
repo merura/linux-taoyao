@@ -1,0 +1,29 @@
+#!/bin/sh
+# Xiaomi taoyao: the panel latches brightness=0 at boot because the DCS
+# brightness command is issued before the panel will accept it. A full
+# panel power cycle (unprepare -> prepare) re-runs the init sequence at a
+# point where the brightness write sticks.
+FB=/sys/class/graphics/fb0/blank
+BL=/sys/class/backlight/ae94000.dsi.0
+
+# wait for the DRM panel + backlight to appear (up to 30s)
+i=0
+while [ $i -lt 60 ]; do
+    [ -e "$FB" ] && [ -e "$BL/actual_brightness" ] && break
+    sleep 0.5
+    i=$((i + 1))
+done
+[ -e "$FB" ] || exit 0
+[ -e "$BL/actual_brightness" ] || exit 0
+
+# let the panel finish coming up before poking it
+sleep 3
+
+# nothing to do if the panel is already lit
+[ "$(cat $BL/actual_brightness)" != "0" ] && exit 0
+
+echo 4 > "$FB"
+sleep 1
+echo 0 > "$FB"
+sleep 1
+cat "$BL/max_brightness" > "$BL/brightness"

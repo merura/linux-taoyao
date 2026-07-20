@@ -187,6 +187,58 @@ first fetch — it's not actually stuck, just give it a minute.
 After install, reboot (or start the relevant seat/greetd service) to get the
 graphical session. No `pmbootstrap` rebuild or reflash needed for this step.
 
+## 10. Black screen fix (panel latches brightness=0 at boot)
+
+Even with everything above correct, the screen can stay completely black
+while the system boots fine (SSH works, no failed units). This is **not** a
+missing/wrong panel driver — it is a boot-time ordering bug.
+
+Symptoms, all simultaneously true:
+
+- `dmesg` shows **no** `DSI PLL(0) lock failed`, panel driver probes cleanly
+- `/sys/class/drm/card0-DSI-1/` → `connected`, `enabled`, dpms `On`
+- `/sys/kernel/debug/dri/0/state` → `crtc-0: enable=1, active=1`, mode
+  `1080x2400`, fbcon plane attached
+- `/dev/fb0` contains real rendered content (non-zero bytes)
+- but `/sys/class/backlight/ae94000.dsi.0/actual_brightness` reads **0**
+  while `brightness` reads `4095`
+
+The panel is scanning out frames correctly and simply emitting no light: the
+DCS brightness command is issued before the panel will accept it, so
+brightness latches at 0. Writing `brightness` afterwards returns success but
+`actual_brightness` stays 0.
+
+A full panel power cycle re-runs `unprepare()` → `prepare()` at a point where
+the brightness write sticks:
+
+```bash
+echo 4 > /sys/class/graphics/fb0/blank   # power panel down
+sleep 1
+echo 0 > /sys/class/graphics/fb0/blank   # power panel up (re-init)
+sleep 1
+cat /sys/class/backlight/ae94000.dsi.0/max_brightness \
+    > /sys/class/backlight/ae94000.dsi.0/brightness
+```
+
+`actual_brightness` then reads `4095` and the display works.
+
+`panel-fix/` in this repo automates that at boot. Install with:
+
+```bash
+install -Dm755 panel-fix/taoyao-panel-fix /usr/local/bin/taoyao-panel-fix
+install -Dm644 panel-fix/taoyao-panel-fix.service \
+    /etc/systemd/system/taoyao-panel-fix.service
+systemctl daemon-reload
+systemctl enable --now taoyao-panel-fix.service
+```
+
+The service must run **late** (`After=multi-user.target`) and the script waits
+for `fb0`/backlight to appear — running it early in boot silently no-ops
+because the display pipeline isn't up yet.
+
+This is a workaround, not a real fix; the ordering bug belongs in the panel
+driver (`panel-xiaomi-taoyao-csot-nt36672c.c`).
+
 ## Known issues (as of this build)
 
 - **Battery**: `qcom-battmgr-bat/usb/wls` uevent failures in dmesg — WIP
@@ -195,6 +247,7 @@ graphical session. No `pmbootstrap` rebuild or reflash needed for this step.
   it separately).
 - **GPU firmware**: `adreno_request_fw` fails to load `a660_sqe.fw` — no 3D
   acceleration yet.
+- **Display**: needs the boot-time workaround in section 10.
 
 ## Credits
 
