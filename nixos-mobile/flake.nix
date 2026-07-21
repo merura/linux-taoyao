@@ -1,5 +1,20 @@
 {
-  description = "Mobile NixOS for Xiaomi 12 Lite 5G (xiaomi-taoyao / SM7325)";
+  description = ''
+    Mobile NixOS for Xiaomi 12 Lite 5G (xiaomi-taoyao / SM7325).
+
+    EXPERIMENT (branch fresh-nixos-mobile-native): evaluate the whole system
+    as genuinely NATIVE aarch64-linux (no crossSystem), so most packages hit
+    Hydra's native aarch64 binary cache instead of building locally. Only the
+    kernel is still built via true cross-compilation (x86_64 -> aarch64),
+    since it is never cached either way and cross-compiling it is much
+    faster than compiling it under QEMU emulation.
+
+    Requires this machine to actually be able to build aarch64-linux
+    derivations, i.e. `boot.binfmt.emulatedSystems = [ "aarch64-linux" ];`
+    in the host's NixOS configuration (~/dotfiles), applied via
+    `nixos-rebuild switch`. Without that, mobile.hardware building or the
+    rootfs build here will fail to find a builder for aarch64-linux.
+  '';
 
   inputs = {
     # Stable 26.05, pinned to the exact revision from ~/dotfiles/flake.lock
@@ -15,12 +30,46 @@
 
   outputs = { self, nixpkgs, mobile-nixos }:
     let
-      # Build host. The target (aarch64) is selected by the device module via
-      # `mobile.system.system`; mobile-nixos' system-target.nix then sets up
-      # nixpkgs.buildPlatform/hostPlatform for cross-compilation.
+      # The system flake commands are invoked from.
       buildSystem = "x86_64-linux";
+      # The system we are actually targeting. Passing this as `system` (not
+      # `crossSystem`) to `import nixpkgs` below is what makes the build
+      # *native* rather than cross: mobile-nixos' system-target.nix computes
+      # `isCross = deviceHostPlatform.system != localSystem.system`, and here
+      # both sides are "aarch64-linux".
+      targetSystem = "aarch64-linux";
 
-      pkgs = import nixpkgs { system = buildSystem; };
+      # `pkgs` used for the *whole* system eval: genuinely native aarch64,
+      # built here via QEMU emulation (requires boot.binfmt.emulatedSystems
+      # on the host, see the description above). This is what lets almost
+      # everything come from cache.nixos.org instead of building locally.
+      pkgs = import nixpkgs { system = targetSystem; };
+
+      # A separate x86_64 pkgs, used only to build the *cross-compiled*
+      # helper eval below. The kernel is our own out-of-tree commit/config,
+      # so it is never going to be cache-hit regardless of approach; cross
+      # compiling it natively on the x86_64 build host is far faster than
+      # compiling it under QEMU emulation (a full kernel build spawns
+      # thousands of `cc1` invocations, each paying emulation overhead).
+      pkgsForCrossKernel = import nixpkgs { system = buildSystem; };
+
+      # `mobile-nixos.kernel-builder`'s `structuredConfig` argument is
+      # populated by an overlay added by modules/kernel-config.nix -- only
+      # present when evaluating through the full module system (it reads
+      # `config.mobile.kernel.structuredConfig`). So rather than hand-call
+      # `kernel-builder` outside that context (where it silently gets `{}`
+      # and crashes calling it as a function), do a second full `evalWith`
+      # identical to the main one except left as x86_64 -> aarch64 cross
+      # (the same approach the `fresh` branch uses), purely to pull a
+      # working kernel package out of it.
+      crossEval = (import "${mobile-nixos-src}/lib/release-tools.nix" {
+        pkgs = pkgsForCrossKernel;
+      }).evalWith {
+        inherit device;
+        modules = [ ./configuration.nix ];
+      };
+
+      crossKernel = crossEval.config.mobile.boot.stage-1.kernel.package;
 
       # Fix cross-compilation of the kernel.
       #
@@ -30,6 +79,9 @@
       # during the kernel's configurePhase, so it dies with
       # "bad interpreter: No such file or directory" (exit 126).
       # `buildPackages` is already in scope there; just use it.
+      #
+      # This only matters for `pkgsCross` (the kernel); the native `pkgs`
+      # instance never cross-compiles, so it never hits this bug.
       mobile-nixos-src = pkgs.applyPatches {
         name = "mobile-nixos-cross-fix";
         src = mobile-nixos;
@@ -47,7 +99,16 @@
         inherit pkgs;
       }).evalWith {
         inherit device;
-        modules = [ ./configuration.nix ];
+        modules = [
+          ./configuration.nix
+          # Override the device module's own kernel wiring: use the
+          # separately cross-compiled kernel instead of whatever the native
+          # `pkgs` would build (which would need to compile the kernel under
+          # QEMU emulation -- correct, but very slow).
+          ({ lib, ... }: {
+            mobile.boot.stage-1.kernel.package = lib.mkForce crossKernel;
+          })
+        ];
       };
 
       outputs' = eval.config.mobile.outputs;
@@ -64,7 +125,7 @@
 
         # Handy for debugging the port.
         inherit (outputs') device-metadata;
-        kernel = eval.config.mobile.boot.stage-1.kernel.package;
+        kernel = crossKernel;
         firmware = eval.config.mobile.device.firmware;
       };
 
