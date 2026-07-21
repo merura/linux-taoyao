@@ -32,6 +32,15 @@
   mobile.boot.stage-1 = {
     compression = "xz";
     kernel.package = pkgs.callPackage ./kernel { };
+
+    # mobile-nixos only adds "rndis" to the USB gadget's feature list when
+    # stage-1 networking is enabled (modules/initrd-usb.nix:
+    # `usb.features = [] ++ optional cfg.networking.enable "rndis"`).
+    # Without this, the gadget only ever exposed "adb" (from
+    # mobile.adbd.enable below) -- the usb0 interface configured in
+    # configuration.nix's systemd-networkd never had an actual rndis
+    # function backing it, so SSH-over-USB never worked.
+    networking.enable = true;
   };
 
   hardware.enableRedistributableFirmware = true;
@@ -39,6 +48,19 @@
   mobile.system.type = "android";
   mobile.system.android = {
     device_name = "taoyao";
+
+    # This device uses dynamic partitions ("super"): the "system" logical
+    # partition is only writable through `fastbootd` (a userspace daemon
+    # normally supplied by AOSP recovery). Our own minimal initrd doesn't
+    # implement fastbootd, and once it's flashed to both A/B slots it also
+    # takes over the "boot to recovery" path, so real fastbootd becomes
+    # unreachable entirely -- same problem postmarketOS hit, solved the same
+    # way there: target `userdata` (a plain, huge physical partition) for
+    # the rootfs instead, so it flashes with plain bootloader `fastboot
+    # flash`. mobile-nixos finds root by filesystem label ("NIXOS_SYSTEM",
+    # see modules/rootfs.nix) at boot, not by partition name, so this is
+    # transparent to stage-1.
+    system_partition_destination = "userdata";
 
     # A/B device. Note both slots must be flashed; the bootloader silently
     # falls back to the other slot after failed boots.

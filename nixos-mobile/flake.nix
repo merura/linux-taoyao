@@ -90,6 +90,22 @@
             --replace-fail \
               'inherit lib path version writeShellScript;' \
               'inherit lib path version; writeShellScript = buildPackages.writeShellScript;'
+
+          # The taoyao kernel's pmic-glink battery-manager driver
+          # (qcom-battmgr-{bat,usb,wls}) refuses synthetic uevents until its
+          # RPC channel to the modem/PMIC firmware is up (kernel logs:
+          # "failed to send synthetic uevent: -11", i.e. EAGAIN), which is
+          # well after stage-1's `udevadm trigger --action=add` runs.
+          # System.run() raises on any nonzero exit, so this single trigger
+          # failure aborts init with INIT_EXCEPTION before display/mount/
+          # switch_root ever happen. Stage-1 doesn't need battery-status
+          # devices, so just exclude the power_supply subsystem from the
+          # early trigger; stage-2's own udev re-triggers everything once
+          # the system (and the glink RPC channel) is fully up.
+          substituteInPlace boot/init/tasks/udev.rb \
+            --replace-fail \
+              'udevadm("trigger", "--action=add")' \
+              'udevadm("trigger", "--action=add", "--subsystem-nomatch=power_supply")'
         '';
       };
 
