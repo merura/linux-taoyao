@@ -116,4 +116,19 @@ in
   # Nix on-device is not useful for a cross-built bring-up image and costs
   # a lot of closure size.
   nix.enable = lib.mkDefault false;
+
+  # ---------------------------------------------------------------------
+  # Kernel image filename
+  # ---------------------------------------------------------------------
+  # mobile-nixos' initrd-kernel.nix sets `system.boot.loader.kernelFile`
+  # from `mobile.boot.stage-1.kernel.package.file` (a passthru attribute),
+  # but `kernel-builder` never actually sets `.file` on its output even
+  # though its own `target` option computes the real produced filename
+  # (here "Image.gz", since our kernel builds with isCompressed = "gz").
+  # Without this, the generic nixpkgs kernel-image sanity check
+  # (nixos/modules/system/boot/kernel.nix) falls back to its own default
+  # ("Image") and fails: "The bootloader cannot find the proper kernel
+  # image." -- that check runs unconditionally whenever boot.kernel.enable
+  # is true, regardless of mobile-nixos using its own boot mechanism.
+  system.boot.loader.kernelFile = "Image.gz";
 }
