@@ -52,6 +52,7 @@ in
     pciutils
     strace
     file
+    fastfetch
   ];
 
   # ---------------------------------------------------------------------
@@ -127,9 +128,10 @@ in
   # panel workaround has run.
   services.getty.autologinUser = lib.mkDefault "root";
 
-  # Nix on-device is not useful for a cross-built bring-up image and costs
-  # a lot of closure size.
-  nix.enable = lib.mkDefault false;
+  # Enabled so `nixos-rebuild switch --target-host` can update stage-2
+  # (packages/services/users/etc.) without a full rebuild+reflash+reboot
+  # cycle. Only kernel/initrd (stage-1) changes still need a reflash.
+  nix.enable = true;
 
   # ---------------------------------------------------------------------
   # Kernel image filename
