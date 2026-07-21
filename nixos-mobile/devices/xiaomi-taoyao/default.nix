@@ -67,7 +67,15 @@
   mobile.usb.idVendor = lib.mkDefault "18D1";
   mobile.usb.idProduct = lib.mkDefault "D001";
   mobile.usb.gadgetfs.functions = {
+    adb = "ffs.adb";
     rndis = "rndis.usb0";
     mass_storage = "mass_storage.0";
   };
+
+  # ADB in stage-1 (the initrd), not just stage-2. This is the only way to
+  # get an interactive shell into the exact environment where a stage-1
+  # boot-error screen (INIT_EXCEPTION) happens -- otherwise there is no
+  # remote access at all until stage-2/networking comes up, which never
+  # happens if stage-1 itself crashes.
+  mobile.adbd.enable = true;
 }

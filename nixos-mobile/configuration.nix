@@ -32,6 +32,20 @@ in
   nixpkgs.config.allowUnfreePredicate = pkg:
     lib.hasPrefix "firmware-xiaomi-taoyao" (lib.getName pkg);
 
+  # mobile-nixos' `gadget-tool` (`gt`, used by adbd's stage-2 systemd unit
+  # to enable the USB gadget) has a CMakeLists.txt with a
+  # cmake_minimum_required below what current CMake supports at all
+  # ("Compatibility with CMake < 3.5 has been removed"). Not fixable by
+  # bumping cmake_minimum_required ourselves without patching upstream
+  # source; the documented escape hatch is this policy-version override.
+  nixpkgs.overlays = lib.mkAfter [
+    (final: prev: {
+      gadget-tool = prev.gadget-tool.overrideAttrs (old: {
+        cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" ];
+      });
+    })
+  ];
+
   environment.systemPackages = with pkgs; [
     htop
     usbutils
