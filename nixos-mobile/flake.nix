@@ -117,6 +117,7 @@
         inherit device;
         modules = [
           ./configuration.nix
+          ./modules/phosh.nix
           # Override the device module's own kernel wiring: use the
           # separately cross-compiled kernel instead of whatever the native
           # `pkgs` would build (which would need to compile the kernel under

@@ -1,2 +1,10 @@
 .direnv/
 .claude/
+
+# `nix build` output symlinks, and our own pinned GC-root directory for
+# build outputs we're actively using (kernel, boot-image, rootfs, etc.) --
+# see nixos-mobile/results/. Kept out of git since these just point at
+# machine-local /nix/store paths.
+nixos-mobile/result
+nixos-mobile/result-*
+nixos-mobile/results/
