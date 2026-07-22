@@ -125,6 +125,46 @@ in
   # WiFi is available (ath11k/wcn6750); leave it managed but off by default.
   networking.wireless.enable = lib.mkDefault false;
 
+  # With depmod enabled, `usb0` (and the whole USB link, not just the
+  # network function -- the host's lsusb loses the device entirely too)
+  # reliably fails to establish/keep carrier from early in boot onward,
+  # for the rest of that session. The system itself stays otherwise fully
+  # healthy the whole time (systemctl is-system-running: running, no
+  # failed units, normal thermals) -- this is not a crash or a hang, just
+  # USB link training failing, confirmed via periodic debug-snapshot
+  # journal entries across the whole boot. Every one of these incidents
+  # actually ended via a manual power-button press
+  # ("systemd-logind: Power key pressed short. Powering off..."), not a
+  # crash -- that's a red herring we chased for a while.
+  #
+  # ath11k (wifi) is blacklisted to bring touchscreen back one variable
+  # at a time. Bluetooth (hci_uart/btqca, on the same WCN6750 combo chip)
+  # is a second, previously untested subsystem that also autoloads with
+  # depmod, blacklisted for the same reason -- neither one turned out to
+  # be it.
+  #
+  # qcom_q6v5_pas (the shared "PAS" loader for ADSP/CDSP/modem remoteproc
+  # firmware) is the new suspect: zstas (this kernel fork's maintainer)
+  # reported in github.com/sc7280-mainline/linux PR #11 that on this
+  # exact device, without his qcom_battmgr timing patch "my DE just
+  # freezes in 5-10 seconds after the startup" -- attributed to
+  # ordering/timing sensitivity between qcom_battmgr and the APR/audio
+  # service IDs that come up during ADSP boot. qcom_battmgr's own
+  # "failed to send synthetic uevent: -11" messages have been present on
+  # every single boot this whole session. This is a real, maintainer-
+  # acknowledged early-boot timing race on this device/kernel, and a
+  # very plausible source of "something else is being starved for
+  # clock/timing resources" -- which would explain why USB specifically,
+  # rather than a specific driver, is what loses out on any given boot.
+  # We don't need audio/compute-DSP/cellular for the current headless
+  # bring-up scope, so blacklisting the whole PAS loader sidesteps the
+  # race entirely rather than trying to fix its timing.
+  boot.blacklistedKernelModules = [
+    "ath11k_ahb" "ath11k"
+    "hci_uart" "btqca" "bluetooth"
+    "qcom_q6v5_pas" "qcom_pil_info" "qcom_q6v5" "qcom_common"
+  ];
+
   # Don't let the firewall get in the way of USB debugging.
   networking.firewall.enable = false;
 
