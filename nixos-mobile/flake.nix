@@ -106,6 +106,44 @@
             --replace-fail \
               'udevadm("trigger", "--action=add")' \
               'udevadm("trigger", "--action=add", "--subsystem-nomatch=power_supply")'
+
+          # This device has no working touchscreen in stage-1 (needs the
+          # depmod fix for hid-goodix-spi to autoload, which turned out to
+          # destabilize USB -- see git history) and no physical keyboard,
+          # so the boot-selection/generation-picker screen would otherwise
+          # wait for touch input forever with no way to interact remotely.
+          # Auto-continue to the default (first) generation after 15s of
+          # no interaction; a real tap within the window still wins, since
+          # this only fires from the top-level menu before any navigation.
+          substituteInPlace boot/recovery-menu/main.rb \
+            --replace-fail \
+              '# We need to start somewhere...
+BootGUI::MainWindow.instance.present
+
+# And keep the GUI active.
+LVGUI.main_loop' \
+              '# We need to start somewhere...
+BootGUI::MainWindow.instance.present
+
+BOOT_TIMEOUT_DEADLINE = Time.now + 15
+
+LVGUI.main_loop do
+  if Time.now >= BOOT_TIMEOUT_DEADLINE
+    if File.exist?(::SELECTIONS)
+      selections = JSON.parse(File.read(::SELECTIONS))
+      first = selections.first
+      if first
+        File.open("/run/boot/choice", "w") do |file|
+          file.write({
+            generation: first["id"],
+            use_generation_kernel: false,
+          }.to_json())
+        end
+        exit 0
+      end
+    end
+  end
+end'
         '';
       };
 
@@ -117,7 +155,6 @@
         inherit device;
         modules = [
           ./configuration.nix
-          ./modules/phosh.nix
           # Override the device module's own kernel wiring: use the
           # separately cross-compiled kernel instead of whatever the native
           # `pkgs` would build (which would need to compile the kernel under

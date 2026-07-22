@@ -24,6 +24,18 @@
 
   hardware.sensor.iio.enable = true;
 
+  # A fresh boot reproducibly hangs completely (no USB/adb/console
+  # activity at all, needs a hard power-cycle) reaching graphical.target
+  # -- which phosh's nixpkgs module pulls in via
+  # `services.graphical-desktop.enable`. This never happened when phosh
+  # was started manually (`systemctl start phosh`) from an
+  # already-running multi-user.target session, so the hang is specific to
+  # something in the boot-time transition into graphical.target itself,
+  # not phosh/phoc. Until that's root-caused (can't be debugged remotely
+  # since the hang leaves no USB/adb access at all), keep multi-user.target
+  # as the actual boot default and only start phosh manually.
+  systemd.defaultUnit = lib.mkForce "multi-user.target";
+
   # phoc (the wlroots compositor Phosh runs on) uses libseat, which needs
   # systemd-logind to mark its session "active" on a seat before it'll open
   # the DRM device. Every VT (tty1..tty6) gets autologin as root, since the

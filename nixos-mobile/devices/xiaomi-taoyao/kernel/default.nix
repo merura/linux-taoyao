@@ -34,20 +34,4 @@ mobile-nixos.kernel-builder {
   # as a makedepend for the same reason; mobile-nixos' kernel-builder does
   # not include it by default.
   nativeBuildInputs = [ buildPackages.python3 ];
-
-  # `make modules_install`'s own depmod invocation is silently skipped
-  # somewhere in this cross-compiled build path: the installed modules
-  # tree only ever has modules.builtin/modules.order (raw kernel-build
-  # artifacts), never modules.dep/modules.alias/modules.symbols (the
-  # depmod-generated indices). Without those, udev has no MODALIAS ->
-  # module mapping, so *no* module ever auto-loads on hotplug -- this is
-  # what silently broke the touchscreen (hid-goodix-spi.ko exists and
-  # insmod's fine by hand, it just never gets loaded automatically) and
-  # wifi (ath11k et al are also modules). Run depmod ourselves as an
-  # explicit postInstall step.
-  postInstall = ''
-    echo ":: Running depmod (builder's own depmod invocation is skipped for this cross-build)"
-    version=$(ls $out/lib/modules)
-    ${buildPackages.kmod}/bin/depmod -b $out -F $out/System.map "$version"
-  '';
 }

@@ -107,6 +107,13 @@ in
       dhcpServerConfig = {
         PoolOffset = 2;
         PoolSize = 4;
+        # This is a USB debug link, not a real uplink -- don't advertise a
+        # default gateway or DNS, since a connecting host's DHCP client
+        # would otherwise happily replace its real default route (wifi/
+        # ethernet) with this dead-end USB link, breaking its actual
+        # internet connectivity. Only hand out an address/subnet.
+        EmitRouter = false;
+        EmitDNS = false;
       };
       linkConfig.RequiredForOnline = false;
     };
