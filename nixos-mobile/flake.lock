@@ -35,7 +35,24 @@
     "root": {
       "inputs": {
         "mobile-nixos": "mobile-nixos",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "sxmo-nix": "sxmo-nix"
+      }
+    },
+    "sxmo-nix": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1670262526,
+        "narHash": "sha256-Rkv5CR31ZrDxbGbOeZMyOXqPdIGKCFd2PNRJs1aiBd8=",
+        "owner": "wentam",
+        "repo": "sxmo-nix",
+        "rev": "74129afef2e5ebc874fc3b02bbda863c8c2a0cdc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "wentam",
+        "repo": "sxmo-nix",
+        "type": "github"
       }
     }
   },

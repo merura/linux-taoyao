@@ -26,9 +26,15 @@
       url = "github:NixOS/mobile-nixos";
       flake = false;
     };
+
+    # Third-party NixOS packaging of SXMO/swmo -- not in nixpkgs itself.
+    sxmo-nix = {
+      url = "github:wentam/sxmo-nix";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, mobile-nixos }:
+  outputs = { self, nixpkgs, mobile-nixos, sxmo-nix }:
     let
       # The system flake commands are invoked from.
       buildSystem = "x86_64-linux";
@@ -149,7 +155,10 @@ end'
 
       device = ./devices/xiaomi-taoyao;
 
-      eval = (import "${mobile-nixos-src}/lib/release-tools.nix" {
+      # Shared by all three DE variants: the base config, debug snapshotting,
+      # and the cross-compiled kernel override. `extraModules` is where the
+      # DE-specific module(s) go.
+      mkEval = extraModules: (import "${mobile-nixos-src}/lib/release-tools.nix" {
         inherit pkgs;
       }).evalWith {
         inherit device;
@@ -163,26 +172,41 @@ end'
           ({ lib, ... }: {
             mobile.boot.stage-1.kernel.package = lib.mkForce crossKernel;
           })
-        ];
+        ] ++ extraModules;
       };
 
-      outputs' = eval.config.mobile.outputs;
+      evalPhosh = mkEval [ ./modules/phosh.nix ];
+      evalPlasmaMobile = mkEval [ ./modules/plasma-mobile.nix ];
+      evalSxmo = mkEval [ (import ./modules/sxmo.nix { sxmoNixSrc = sxmo-nix; }) ];
+
+      # `prefix`-namespaced so all three DE variants' packages can live
+      # flat under packages.${buildSystem} (flake checks require every leaf
+      # there to be a derivation, not a nested attrset).
+      mkPackages = prefix: eval:
+        let outputs' = eval.config.mobile.outputs; in {
+          # Android boot image (kernel + initrd + appended DTB) for fastboot.
+          "${prefix}boot-image" = outputs'.android.android-bootimg;
+
+          # Full rootfs image.
+          "${prefix}default" = outputs'.default or outputs'.android.default;
+
+          # Handy for debugging the port.
+          "${prefix}device-metadata" = outputs'.device-metadata;
+          "${prefix}kernel" = crossKernel;
+          "${prefix}firmware" = eval.config.mobile.device.firmware;
+        };
     in
     {
-      nixosConfigurations.taoyao = eval;
-
-      packages.${buildSystem} = {
-        # Android boot image (kernel + initrd + appended DTB) for fastboot.
-        boot-image = outputs'.android.android-bootimg;
-
-        # Full rootfs image.
-        default = outputs'.default or outputs'.android.default;
-
-        # Handy for debugging the port.
-        inherit (outputs') device-metadata;
-        kernel = crossKernel;
-        firmware = eval.config.mobile.device.firmware;
+      nixosConfigurations = {
+        taoyao = evalPhosh;
+        taoyao-plasma-mobile = evalPlasmaMobile;
+        taoyao-sxmo = evalSxmo;
       };
+
+      packages.${buildSystem} =
+        (mkPackages "" evalPhosh)
+        // (mkPackages "plasma-mobile-" evalPlasmaMobile)
+        // (mkPackages "sxmo-" evalSxmo);
 
       devShells.${buildSystem}.default = pkgs.mkShell {
         packages = with pkgs; [ android-tools ];

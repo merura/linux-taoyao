@@ -32,6 +32,15 @@ in
   nixpkgs.config.allowUnfreePredicate = pkg:
     lib.hasPrefix "firmware-xiaomi-taoyao" (lib.getName pkg);
 
+  # sxmo-utils depends on youtube-dl for video downloads. It's marked
+  # insecure in this nixpkgs revision, but only as an "unmaintained,
+  # migrate to yt-dlp" advisory -- no actual CVE list (unlike libsoup2,
+  # which is excluded outright below via the mmsd-tng stub). Allowing it
+  # is a reasonable call for this feature.
+  nixpkgs.config.permittedInsecurePackages = [
+    "python3.13-youtube-dl-2021.12.17"
+  ];
+
   # mobile-nixos' `gadget-tool` (`gt`, used by adbd's stage-2 systemd unit
   # to enable the USB gadget) has a CMakeLists.txt with a
   # cmake_minimum_required below what current CMake supports at all
@@ -43,6 +52,18 @@ in
       gadget-tool = prev.gadget-tool.overrideAttrs (old: {
         cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" ];
       });
+
+      # `light` and `pn` were both removed from nixpkgs (unmaintained /
+      # upstream archived). sxmo-utils lists both as build dependencies but
+      # neither is actually invoked by any of its scripts (checked) -- these
+      # only need to satisfy callPackage's argument resolution, not provide
+      # working commands at runtime.
+      light = prev.brightnessctl;
+      pn = prev.writeShellScriptBin "pn" ''
+        echo "pn: stub (upstream removed from nixpkgs, unused by sxmo-utils scripts)" >&2
+        exit 1
+      '';
+
     })
   ];
 
@@ -61,9 +82,8 @@ in
   users.mutableUsers = false;
 
   users.users.root = {
-    # Same throwaway password as the pmOS bring-up. Change it.
     hashedPassword = null;
-    initialPassword = "pmos1234";
+    initialPassword = "1234";
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMYcdiZTkmjVhqK+IEDv6Q9bSSyc7LkWK3vyfsPkVMen"
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICmpu/fDlXWg4VsFdZ2bqi02QQM74zux7LprQriqbRsn"
@@ -72,7 +92,7 @@ in
 
   users.users.user = {
     isNormalUser = true;
-    initialPassword = "pmos1234";
+    initialPassword = "1234";
     extraGroups = [ "wheel" "video" "input" "dialout" ];
     openssh.authorizedKeys.keys =
       config.users.users.root.openssh.authorizedKeys.keys;
@@ -122,7 +142,22 @@ in
   networking.useNetworkd = true;
   networking.useDHCP = false;
 
-  # WiFi is available (ath11k/wcn6750); leave it managed but off by default.
+  # mobile-nixos (or one of the desktop-manager modules) enables
+  # NetworkManager by default regardless of our own wifi setting below --
+  # harmless with ath11k blacklisted (no wifi hardware for it to manage),
+  # but make sure it never takes over the USB debug link from
+  # systemd-networkd regardless.
+  networking.networkmanager.unmanaged = [ usbInterface ];
+
+  # WiFi is available (ath11k/wcn6750), but its firmware loads through the
+  # very same qcom_q6v5_pas/remoteproc stack blacklisted below to fix the
+  # USB-carrier-loss bug (dmesg: "ath11k: failed to get rproc") -- this
+  # isn't a case of wifi not needing PAS, the WCN6750 chip's firmware *is*
+  # a PAS-loaded remoteproc instance, same as ADSP/CDSP. So wifi and the
+  # USB fix are mutually exclusive as long as the whole PAS loader is
+  # blacklisted. Leaving wifi off until there's a way to allow just the
+  # wifi/WPSS rproc instance without also re-triggering the ADSP/CDSP
+  # timing race zstas documented (see blacklist comment below).
   networking.wireless.enable = lib.mkDefault false;
 
   # With depmod enabled, `usb0` (and the whole USB link, not just the
@@ -137,11 +172,9 @@ in
   # ("systemd-logind: Power key pressed short. Powering off..."), not a
   # crash -- that's a red herring we chased for a while.
   #
-  # ath11k (wifi) is blacklisted to bring touchscreen back one variable
-  # at a time. Bluetooth (hci_uart/btqca, on the same WCN6750 combo chip)
-  # is a second, previously untested subsystem that also autoloads with
-  # depmod, blacklisted for the same reason -- neither one turned out to
-  # be it.
+  # Bluetooth (hci_uart/btqca, on the same WCN6750 combo chip) stays
+  # blacklisted too -- not requested, and never tested in combination with
+  # the PAS fix.
   #
   # qcom_q6v5_pas (the shared "PAS" loader for ADSP/CDSP/modem remoteproc
   # firmware) is the new suspect: zstas (this kernel fork's maintainer)
@@ -168,12 +201,26 @@ in
   # Don't let the firewall get in the way of USB debugging.
   networking.firewall.enable = false;
 
+  # Any libseat-based Wayland compositor (phoc, kwin_wayland, sway) needs
+  # systemd-logind to mark its session "active" on a seat before it'll open
+  # the DRM device. Every VT (tty1..tty6) gets autologin as root, since the
+  # autologin override lands on the getty@.service *template*, not just
+  # tty1 -- with more than one VT auto-spawned, whichever VT last had
+  # kernel-console focus at boot becomes logind's "active" session, and if
+  # that isn't the compositor's own tty1 session, its libseat backend waits
+  # forever ("Timeout waiting session to become active") and never opens
+  # the DRM device. This device has one physical screen, so there's no
+  # reason to auto-spawn more than one VT in the first place. Shared across
+  # all DE variants (Phosh/Plasma Mobile/SXMO), not just Phosh.
+  services.logind.settings.Login.NAutoVTs = 1;
+
   # ---------------------------------------------------------------------
   # Console
   # ---------------------------------------------------------------------
-  # Getty on the framebuffer console so the screen is usable once the
-  # panel workaround has run.
-  services.getty.autologinUser = lib.mkDefault "root";
+  # No console autologin -- anyone with physical/USB access would otherwise
+  # get an unauthenticated root shell on tty1. SSH access (key-based) and
+  # each DE's own login/session flow are the intended access paths; a
+  # console login still works, it just requires the password now.
 
   # Enabled so `nixos-rebuild switch --target-host` can update stage-2
   # (packages/services/users/etc.) without a full rebuild+reflash+reboot
