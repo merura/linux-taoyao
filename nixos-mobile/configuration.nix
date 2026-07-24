@@ -150,15 +150,8 @@ in
     unmanaged = [ usbInterface ];
   };
 
-  # RE-TESTING (previously left off): wifi's firmware (ath11k/wcn6750)
-  # loads through the same qcom_q6v5_pas/remoteproc stack that was
-  # blacklisted below to fix the USB-carrier-loss bug (dmesg confirmed:
-  # "ath11k: failed to get rproc" without PAS) -- so testing wifi
-  # necessarily means un-blacklisting PAS too (see below), which is
-  # exactly what caused the original USB instability. This combination
-  # (PAS un-blacklisted + wifi enabled, on top of everything fixed since
-  # then -- never-suspend, etc.) has never been soak-tested. Needs an
-  # unattended multi-minute reboot test before trusting it.
+  # wifi's firmware (ath11k/wcn6750) loads through the qcom_q6v5_pas
+  # remoteproc stack (the "wpss" instance), same as adsp/cdsp/modem.
   # NetworkManager handles wifi association itself (its own internal
   # wpa_supplicant integration) -- networking.wireless.enable (the
   # standalone wpa_supplicant module) is mutually exclusive with it and
@@ -167,24 +160,21 @@ in
   # ath11k needs its regulatory-domain firmware blob to associate at all.
   hardware.wirelessRegulatoryDatabase = true;
 
-  # HISTORY: with depmod enabled, `usb0` (and the whole USB link, not just
-  # the network function) reliably failed to establish/keep carrier from
-  # early boot onward. Root-caused to qcom_q6v5_pas (the shared "PAS"
-  # loader for ADSP/CDSP/modem remoteproc firmware): zstas (this kernel
-  # fork's maintainer) reported in github.com/sc7280-mainline/linux PR #11
-  # that without his qcom_battmgr timing patch "my DE just freezes in
-  # 5-10 seconds after the startup" -- an early-boot timing race between
-  # qcom_battmgr and the APR/audio service IDs that come up during ADSP
-  # boot, starving USB (or whatever else) of clock/timing resources.
-  # Blacklisting the whole PAS loader sidestepped the race.
-  #
-  # PAS is un-blacklisted now to re-test wifi (ath11k's firmware is
-  # *itself* a PAS-loaded remoteproc instance, so wifi and the PAS
-  # blacklist were mutually exclusive) -- needs an unattended multi-minute
-  # soak test to confirm the USB bug doesn't resurface with this exact
-  # combination (PAS enabled + wifi + everything else fixed since, e.g.
-  # sxmo's never-suspend). If it does resurface, PAS goes back on the
-  # blacklist and wifi goes with it.
+  # HISTORY: usb0 used to reliably lose/never establish carrier the
+  # instant the adsp remoteproc came up, at any point after boot (not a
+  # timing race -- confirmed via a fully deterministic test: blacklisting
+  # qcom_q6v5_pas entirely, then modprobing it back 30+ seconds after
+  # usb0 already had confirmed carrier, still killed USB within seconds).
+  # Root-caused (see kernel commit "arm64: dts: qcom: taoyao: force
+  # usb_1 dr_mode to peripheral" on the pinned kernel fork/rev): usb_1's
+  # devicetree override never set dr_mode, so dwc3 defaulted to OTG and
+  # registered a USB role switch; the instant adsp's firmware exposes
+  # charger_pd, pmic-glink's UCSI client calls usb_role_switch_set_role()
+  # on it, and dwc3_set_mode() tears down the already-running gadget to
+  # switch roles. Fixed at the kernel/devicetree level (dr_mode forced to
+  # "peripheral", so no role switch is ever registered) -- no NixOS-level
+  # boot-sequencing workaround needed anymore. All four remoteproc
+  # instances (modem/adsp/wpss/cdsp) now autoboot normally.
   #
   # Bluetooth (hci_uart/btqca, same WCN6750 combo chip) stays blacklisted
   # -- not requested, never tested.
@@ -192,26 +182,23 @@ in
     "hci_uart" "btqca" "bluetooth"
   ];
 
+  # TRIED AND REVERTED: the debug-snapshot.service periodic diagnostic
+  # (see below) caught /sys/class/power_supply/ucsi-source-psy-*/uevent
+  # showing POWER_SUPPLY_USB_TYPE=C [PD] PD_PPS on a dead-USB boot,
+  # suggesting UCSI's PD/PPS power negotiation (a mechanism entirely
+  # separate from the dr_mode=peripheral fix already applied, since
+  # UCSI's PD policy engine runs independent of dwc3's data-role state
+  # machine) might be what kills the link. Tested unbinding ucsi_glink's
+  # auxiliary-bus device (pmic_glink.ucsi.0) via udev as early as
+  # possible, before any PD negotiation. Result: worse, not better --
+  # "UCSI version unknown" in dmesg (interrupted mid-init) and the UDC
+  # never left "default" state at all, i.e. the gadget didn't connect
+  # even once. So UCSI being present is *necessary* for the gadget to
+  # connect in the first place; something about it *completing*
+  # negotiation is what kills it later, not its mere presence. Reverted.
+
   # Don't let the firewall get in the way of USB debugging.
   networking.firewall.enable = false;
-
-  # ATTEMPT: keep wifi (wpss, a PAS-loaded remoteproc instance) while
-  # avoiding the USB-carrier-loss race, which zstas's own PR discussion
-  # ties to ADSP timing specifically ("without that patch my DE just
-  # freezes in 5-10 seconds after the startup"). wpss (wifi) is a
-  # separate remoteproc instance from adsp/cdsp under the same
-  # qcom_q6v5_pas driver -- module-level blacklisting can't target just
-  # one instance, so this stops adsp/cdsp the instant their remoteproc
-  # device node appears (before their own firmware-boot sequence can run
-  # far enough to race with USB init), while leaving wpss/modem alone.
-  # UNVERIFIED: confirmed a *live* stop (after boot) does NOT retroactively
-  # fix USB once it's already failed to establish carrier -- this only
-  # has a chance of working if it intervenes early enough at boot,
-  # which needs an actual reboot to test.
-  services.udev.extraRules = ''
-    SUBSYSTEM=="remoteproc", ATTR{name}=="adsp", ATTR{state}="stop"
-    SUBSYSTEM=="remoteproc", ATTR{name}=="cdsp", ATTR{state}="stop"
-  '';
 
   # Any libseat-based Wayland compositor (phoc, kwin_wayland, sway) needs
   # systemd-logind to mark its session "active" on a seat before it'll open
